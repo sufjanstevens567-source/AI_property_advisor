@@ -95,3 +95,10 @@ test('runs stress tests correctly', () => {
   // combined > 300 and severe >= 0 -> Robust
   expect(combined.resilienceCategory).toBe('Robust');
 });
+
+test('break-even rent solves against the same tax floor used in cash flow', () => {
+  const result = calculateFinancials(input, assumptions);
+  const breakEvenResult = calculateFinancials({ ...input, monthlyRent: result.breakEvenRent }, assumptions);
+
+  expect(breakEvenResult.monthlyCashFlowByTaxRate['30']).toBeCloseTo(0, 1);
+});

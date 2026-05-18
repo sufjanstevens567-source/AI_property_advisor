@@ -1,10 +1,12 @@
 export type PropertyDataStatus = {
   isSizeUnknown: boolean;
   isServiceChargeEstimated: boolean;
+  isServiceChargeUnknown?: boolean;
   isBerUnknown: boolean;
   isTenancyUnknown: boolean;
   isMicroLocationUncertain: boolean;
   isPreviousRentUnknown: boolean;
+  rentCompTier?: "A" | "B" | "C" | "D" | "None";
 };
 
 export type PropertyQualitativeInput = {
@@ -48,11 +50,14 @@ export function calculateScores(inputs: ScoringInputs): ScoringOutputs {
   // 1. Data Quality Score
   let dqScore = 10;
   if (inputs.dataStatus.isSizeUnknown) dqScore -= 1.5;
-  if (inputs.dataStatus.isServiceChargeEstimated) dqScore -= 1.0;
+  if (inputs.dataStatus.isServiceChargeUnknown) dqScore -= 1.5;
+  else if (inputs.dataStatus.isServiceChargeEstimated) dqScore -= 1.0;
   if (inputs.dataStatus.isBerUnknown) dqScore -= 1.0;
   if (inputs.dataStatus.isTenancyUnknown) dqScore -= 1.0;
   if (inputs.dataStatus.isMicroLocationUncertain) dqScore -= 1.5;
   if (inputs.dataStatus.isPreviousRentUnknown) dqScore -= 1.0;
+  if (inputs.dataStatus.rentCompTier === "D") dqScore -= 0.5;
+  if (inputs.dataStatus.rentCompTier === "None") dqScore -= 1.0;
   
   dqScore = Math.max(1, Math.round(dqScore * 2) / 2); // Round to nearest 0.5
 
@@ -113,12 +118,12 @@ export function calculateScores(inputs: ScoringInputs): ScoringOutputs {
 
   if (q.omcRisk < 6) {
     overallRiskAdjustedScore -= 1.0;
-    flags.push("Current OMC liability risk score below 6.");
+    flags.push("Management-company document risk score below 6.");
   }
 
   if (q.berRisk < 6) {
     overallRiskAdjustedScore -= 1.0;
-    flags.push("BER is D or below (needs funded upgrade plan).");
+    flags.push("Energy rating is D or below; model market-rent drag and fund the upgrade plan.");
   }
 
   overallRiskAdjustedScore = Math.max(1, Math.min(10, overallRiskAdjustedScore));
