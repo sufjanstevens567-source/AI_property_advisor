@@ -49,6 +49,35 @@ export type FinancialResult = {
   breakEvenRent: number;
 };
 
+function annualCosts(input: PropertyFinancialInput, annualHeadlineRent: number, assumptions: InvestorAssumptions): number {
+  return (
+    input.annualServiceCharge +
+    input.annualMaintenance +
+    input.annualInsurance +
+    input.annualAccountingCompliance +
+    input.annualLettingFeeAmortised +
+    input.annualCapexReserve +
+    (input.annualBerAllowance || 0) +
+    (assumptions.managementFeePct ? annualHeadlineRent * assumptions.managementFeePct : 0)
+  );
+}
+
+function annualCashFlowForMonthlyRent(
+  monthlyRent: number,
+  input: PropertyFinancialInput,
+  assumptions: InvestorAssumptions,
+  annualMortgagePayment: number,
+  yearOneInterest: number
+): number {
+  const annualHeadlineRent = monthlyRent * 12;
+  const vacancyAdjustedRent = annualHeadlineRent * ((12 - assumptions.vacancyMonthsBase) / 12);
+  const totalAnnualCosts = annualCosts(input, annualHeadlineRent, assumptions);
+  const taxableProfit = Math.max(0, vacancyAdjustedRent - yearOneInterest - totalAnnualCosts);
+  const estimatedTax = taxableProfit * assumptions.centralTaxRate;
+
+  return vacancyAdjustedRent - totalAnnualCosts - estimatedTax - annualMortgagePayment;
+}
+
 export type StressScenario = {
   id: number;
   name: string;
@@ -109,15 +138,7 @@ export function calculateFinancials(
   const grossYieldOnAcquisitionCost = annualHeadlineRent / totalAcquisitionCost;
 
   // Operating Costs
-  const totalAnnualCosts =
-    input.annualServiceCharge +
-    input.annualMaintenance +
-    input.annualInsurance +
-    input.annualAccountingCompliance +
-    input.annualLettingFeeAmortised +
-    input.annualCapexReserve +
-    (input.annualBerAllowance || 0) +
-    (assumptions.managementFeePct ? annualHeadlineRent * assumptions.managementFeePct : 0);
+  const totalAnnualCosts = annualCosts(input, annualHeadlineRent, assumptions);
 
   const taxableProfitByTaxRate: Record<string, number> = {};
   const estimatedTaxByTaxRate: Record<string, number> = {};
@@ -152,14 +173,33 @@ export function calculateFinancials(
 
   const dscr = annualMortgagePayment > 0 ? vacancyAdjustedRent / annualMortgagePayment : 0;
 
-  // Break-even rent: vacancyAdjustedRent - totalAnnualCosts - tax - annualMortgagePayment = 0
-  // tax = (vacancyAdjustedRent - yearOneInterest - totalAnnualCosts) * centralTaxRate
-  // CF = (1 - t) * vacancyAdjustedRent - (1 - t) * totalAnnualCosts + t * yearOneInterest - annualMortgagePayment = 0
-  // vacancyAdjustedRent = (annualMortgagePayment - t * yearOneInterest + (1 - t) * totalAnnualCosts) / (1 - t)
-  // Monthly Break-Even Rent = vacancyAdjustedRent / ((12 - vacancyMonthsBase) / 12) / 12
-  const t = assumptions.centralTaxRate;
-  const targetAnnualVacancyAdjustedRent = (annualMortgagePayment - t * yearOneInterest + (1 - t) * totalAnnualCosts) / (1 - t);
-  const breakEvenRent = targetAnnualVacancyAdjustedRent / ((12 - assumptions.vacancyMonthsBase) / 12) / 12;
+  let lowRent = 0;
+  let highRent = Math.max(input.monthlyRent * 2, 1000);
+  while (
+    annualCashFlowForMonthlyRent(highRent, input, assumptions, annualMortgagePayment, yearOneInterest) < 0 &&
+    highRent < 50000
+  ) {
+    highRent *= 2;
+  }
+
+  for (let i = 0; i < 60; i++) {
+    const midRent = (lowRent + highRent) / 2;
+    const midCashFlow = annualCashFlowForMonthlyRent(
+      midRent,
+      input,
+      assumptions,
+      annualMortgagePayment,
+      yearOneInterest
+    );
+
+    if (midCashFlow >= 0) {
+      highRent = midRent;
+    } else {
+      lowRent = midRent;
+    }
+  }
+
+  const breakEvenRent = highRent;
 
   return {
     totalAcquisitionCost,
@@ -233,20 +273,16 @@ export function runStressTests(
     };
   });
 
-  const getResilienceCategory = (combined: number, severe: number): StressResult['resilienceCategory'] => {
-    if (combined > 300 && severe >= 0) return 'Robust';
-    if (combined > 100 && combined <= 300) return 'Good';
-    if (combined > 0 && combined <= 100) return 'Thin but positive';
-    if (combined < 0 && baseResult.monthlyCashFlowByTaxRate[centralTaxKey] > 0) return 'Weak';
+  const getResilienceCategory = (monthlyCashFlow: number): StressResult['resilienceCategory'] => {
+    if (monthlyCashFlow > 300) return 'Robust';
+    if (monthlyCashFlow > 100) return 'Good';
+    if (monthlyCashFlow >= 0) return 'Thin but positive';
+    if (baseResult.monthlyCashFlowByTaxRate[centralTaxKey] > 0) return 'Weak';
     return 'Fragile';
   };
 
-  const combinedCF = results.find(r => r.scenarioId === 9)!.monthlyCashFlow;
-  const severeCF = results.find(r => r.scenarioId === 10)!.monthlyCashFlow;
-  const category = getResilienceCategory(combinedCF, severeCF);
-
   return results.map(r => ({
     ...r,
-    resilienceCategory: category
+    resilienceCategory: getResilienceCategory(r.monthlyCashFlow)
   }));
 }
