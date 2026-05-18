@@ -1,0 +1,882 @@
+Revised step-by-step build plan for AI coding agents
+
+You can paste the following into your repo as docs/BUILD_PLAN.md and feed it to Codex, Claude Cowork, or Antigravity.
+
+# Irish Buy-to-Let Underwriting App — MVP Build Plan
+
+## Product thesis
+
+Build an Irish residential buy-to-let screening and underwriting app.
+
+The app lets a user:
+1. set investor assumptions once,
+2. add Irish property listings manually or via URL,
+3. confirm/edit extracted listing facts,
+4. enter or verify rent comparables,
+5. run deterministic financial modelling,
+6. score risks and data quality,
+7. compare properties,
+8. generate a simple scorecard and full underwriting report,
+9. calculate negotiation ranges and next due-diligence actions.
+
+The MVP is Dublin-first but Ireland-capable in architecture.
+
+Do not position this as investment advice. Use language such as screening, underwriting, scenario analysis, risk flags, and due diligence. Always include “verify with solicitor, tax advisor, broker, surveyor.”
+
+---
+
+# Core principles
+
+## 1. Deterministic calculations
+All financial calculations must be code-based, not LLM-generated.
+
+The LLM may:
+- extract listing facts,
+- summarize listing text,
+- classify rent comps,
+- explain risks,
+- draft narrative sections,
+- draft negotiation messages.
+
+The LLM must not be trusted to compute:
+- mortgage payment,
+- amortization,
+- cash flow,
+- tax scenarios,
+- stress tests,
+- ROI,
+- rankings.
+
+## 2. User confirmation
+Every auto-extracted property fact must pass through a user confirmation/edit screen before analysis.
+
+## 3. Data quality is first-class
+Every property must show:
+- confirmed fields,
+- estimated fields,
+- unknown fields,
+- source/evidence,
+- data quality score,
+- ranking confidence.
+
+## 4. Dublin-first, Ireland-capable
+Initial calibration is Dublin-focused. Non-Dublin properties can be entered, but outputs must show lower confidence until market-specific calibration is added.
+
+## 5. No monitoring in MVP v1
+Do not build scheduled monitoring, Gmail ingestion, or email alerts in v1. Add later after core underwriting workflow is stable.
+
+---
+
+# Recommended stack
+
+Use a web app architecture.
+
+Suggested stack:
+- Frontend: Next.js + React + TypeScript
+- Styling: Tailwind CSS + shadcn/ui
+- Backend/API: Next.js API routes or server actions
+- Database: Supabase Postgres
+- Auth: Supabase Auth or Clerk
+- ORM: Prisma or Drizzle
+- Financial engine: TypeScript package in `/packages/financial-engine`
+- Scoring engine: TypeScript package in `/packages/scoring-engine`
+- AI prompts/extraction: `/packages/ai-prompts`
+- Report schema: `/packages/report-schema`
+- Tests: Vitest
+- E2E: Playwright later
+
+Repo structure:
+
+```text
+property-underwriter/
+  apps/
+    web/
+  packages/
+    financial-engine/
+    scoring-engine/
+    report-schema/
+    ai-prompts/
+  docs/
+    product-spec.md
+    build-plan.md
+    formula-spec.md
+    scoring-spec.md
+    ux-flow.md
+  reference/
+    SKILL.md
+    audit_checklist.md
+    financial_model_formulas.md
+    negotiation_module.md
+    scoring_rubric.md
+  tests/
+    fixtures/
+      sample-properties.json
+      expected-results.json
+Phase 0 — Convert reference files into product spec
+Goal
+
+Turn the existing Skill/reference files into implementation requirements.
+
+Inputs
+reference/SKILL.md
+reference/financial_model_formulas.md
+reference/scoring_rubric.md
+reference/negotiation_module.md
+reference/audit_checklist.md
+Tasks
+Create docs/product-spec.md.
+Create docs/formula-spec.md.
+Create docs/scoring-spec.md.
+Create docs/ux-flow.md.
+Create docs/report-sections.md.
+Requirements
+
+formula-spec.md must include:
+
+total acquisition cost,
+mortgage required,
+amortization,
+annual rent,
+vacancy,
+operating costs,
+tax scenarios,
+after-tax cash flow,
+economic ROI,
+appreciation cases,
+stress tests #1–#10,
+service-charge sensitivity,
+rent sensitivity.
+
+scoring-spec.md must include:
+
+16 qualitative dimensions,
+data quality score,
+resilience overlay,
+objective-based rankings.
+Acceptance criteria
+A developer can implement the financial engine from formula-spec.md without reading the prompt files.
+Every calculation has a formula and example.
+Every score has a 1–10 definition.
+
+---
+
+## Phase 1 — Build deterministic financial engine
+
+```markdown
+# Phase 1 — Financial Engine
+
+## Goal
+Build a pure TypeScript financial engine with no UI and no AI dependency.
+
+## Package
+`packages/financial-engine`
+
+## Inputs
+
+```ts
+type InvestorAssumptions = {
+  cashDeployed: number
+  mortgageRate: number
+  mortgageTermYears: number
+  vacancyMonthsBase: number
+  taxRates: number[] // [0.2, 0.3, 0.4]
+  centralTaxRate: number // 0.3 by default
+  managementFeePct?: number
+}
+
+type PropertyFinancialInput = {
+  purchasePrice: number
+  monthlyRent: number
+  stampDuty: number
+  legalSetupCost: number
+  furnishingSetupCost: number
+  refurbishmentCost: number
+  berUpgradeCost: number
+  annualServiceCharge: number
+  annualMaintenance: number
+  annualInsurance: number
+  annualAccountingCompliance: number
+  annualLettingFeeAmortised: number
+  annualCapexReserve: number
+  annualBerAllowance?: number
+}
+Outputs
+type FinancialResult = {
+  totalAcquisitionCost: number
+  mortgageRequired: number
+  ltv: number
+  monthlyMortgagePayment: number
+  annualMortgagePayment: number
+  yearOneInterest: number
+  yearOnePrincipal: number
+  annualHeadlineRent: number
+  vacancyAdjustedRent: number
+  grossYieldOnPrice: number
+  grossYieldOnAcquisitionCost: number
+  taxableProfitByTaxRate: Record<string, number>
+  estimatedTaxByTaxRate: Record<string, number>
+  annualAfterTaxCashFlowByTaxRate: Record<string, number>
+  monthlyCashFlowByTaxRate: Record<string, number>
+  economicReturnByTaxRate: Record<string, number>
+  economicRoiByTaxRate: Record<string, number>
+  roiWith2PctAppreciationByTaxRate: Record<string, number>
+  roiWith4PctAppreciationByTaxRate: Record<string, number>
+  dscr: number
+  breakEvenRent: number
+}
+Stress test outputs
+type StressScenario = {
+  id: number
+  name: string
+  rentMultiplier: number
+  costMultiplier: number
+  vacancyMonths: number
+  mortgageRate: number
+}
+
+type StressResult = {
+  scenarioId: number
+  monthlyCashFlow: number
+  dscr: number
+  resilienceCategory: 'Robust' | 'Good' | 'Thin but positive' | 'Weak' | 'Fragile'
+}
+Required stress tests
+Base
+Rent -10%
+Rent -15%
+Costs +25%
+2 months vacancy
+3 months vacancy
+Rate 7%
+Rate 8%
+Combined downside: rent x 0.90, costs x 1.25, 10/12 occupancy, 7% rate
+Severe downside: rent x 0.85, costs x 1.25, 9/12 occupancy, 8% rate
+Tests
+
+Create Vitest tests for:
+
+mortgage payment,
+amortization,
+total acquisition cost,
+mortgage required,
+year-one principal,
+tax scenario 20/30/40,
+annual after-tax cash flow,
+economic ROI,
+ROI with appreciation,
+stress scenario #9,
+stress scenario #10.
+Acceptance criteria
+All tests pass.
+No AI calls are used.
+A sample property produces outputs consistent with hand-calculated sanity checks.
+
+---
+
+## Phase 2 — Manual property entry app
+
+```markdown
+# Phase 2 — Manual Property Entry UI
+
+## Goal
+Build the first usable app without URL extraction.
+
+## Screens
+
+### 1. Investor Setup
+Simple setup fields:
+- cash deployed,
+- mortgage rate,
+- mortgage term,
+- tax residency,
+- central tax case,
+- self-managed vs agent-managed,
+- vacancy months,
+- target geography,
+- risk preference: yield / resilience / balanced.
+
+Advanced dropdown:
+- tax rates,
+- management fee,
+- maintenance assumptions,
+- appreciation assumptions,
+- stress-rate assumptions,
+- minimum cash flow target,
+- minimum BER preference,
+- excluded building types/areas.
+
+### 2. Add Property Manually
+Fields:
+- property name,
+- listing URL,
+- price,
+- address,
+- micro-location,
+- beds,
+- baths,
+- size m²,
+- BER,
+- floor,
+- parking,
+- balcony/terrace,
+- service charge,
+- service charge status: confirmed/estimated/unknown,
+- tenancy status,
+- previous rent,
+- current/expected rent,
+- OMC/building risk notes.
+
+### 3. Fact Confirmation
+Show every fact with:
+- value,
+- source,
+- confidence,
+- user edit field.
+
+### 4. Analysis Result — Simple View
+Cards:
+- verdict,
+- price,
+- mortgage required,
+- base rent,
+- monthly cash flow at 30% tax,
+- economic ROI at 30% tax,
+- stress #9 result,
+- data quality score,
+- top 3 risks,
+- recommended opening/target/walk-away.
+
+### 5. Analysis Result — Full View
+Tabs:
+- listing facts,
+- rent comps,
+- financials,
+- tax sensitivity,
+- stress tests,
+- risks,
+- scoring,
+- negotiation,
+- due diligence.
+
+## Acceptance criteria
+- User can enter one property manually.
+- App calculates financials using the financial engine.
+- User can save property.
+- Simple and full views render correctly.
+- All financial values use 30% tax as headline central case.
+Phase 3 — Scoring engine
+# Phase 3 — Scoring Engine
+
+## Goal
+Implement qualitative and data-quality scoring.
+
+## Package
+`packages/scoring-engine`
+
+## Inputs
+- property facts,
+- rent confidence,
+- legal rent confidence,
+- data quality metadata,
+- stress results,
+- OMC risk,
+- BER,
+- location/micro-location,
+- user objective.
+
+## Outputs
+- 16 dimension scores,
+- weighted resilience score,
+- data quality score,
+- overall risk-adjusted score,
+- ranking confidence,
+- risk flags.
+
+## Required scores
+1. Location quality
+2. Safety / tenant perception
+3. Recession resilience
+4. Tenant demand
+5. Likelihood of achieving base rent
+6. Rent-control/legal rent confidence
+7. Building quality
+8. OMC/remediation risk
+9. BER/energy risk
+10. Service-charge reasonableness
+11. Maintenance/capex risk
+12. Layout/size quality
+13. Parking value
+14. Resale liquidity
+15. Operational hassle
+16. Overall risk-adjusted attractiveness
+
+## Data Quality Score
+Start at 10.
+Deduct for:
+- size unknown,
+- service charge estimated/unknown,
+- BER unknown,
+- tenancy unknown,
+- micro-location uncertain,
+- previous rent unknown where relevant,
+- only weak rent comps.
+
+## Acceptance criteria
+- Scores render with explanation.
+- Low data quality prevents unconditional “Buy.”
+- BER D/E produces capex/risk flags.
+- Unknown tenancy reduces legal rent confidence.
+- Estimated service charge triggers service-charge sensitivity.
+Phase 4 — Rent comp module
+# Phase 4 — Rent Comparables
+
+## Goal
+Allow users to add rent comps manually and classify relevance.
+
+## UI
+For each rent comp:
+- URL/source,
+- address/development,
+- rent,
+- beds,
+- baths,
+- size,
+- BER,
+- parking,
+- same building? yes/no,
+- comp tier A/B/C/D,
+- adjustment notes.
+
+## Logic
+Comp tiers:
+- Tier A: same building/block
+- Tier B: same development/adjacent block
+- Tier C: same micro-area
+- Tier D: broader area
+
+Rules:
+- High rent confidence requires Tier A or B.
+- Medium requires multiple strong Tier C comps.
+- Tier D only means Low confidence.
+- If no comps are entered, rent confidence is Low.
+
+## Outputs
+- conservative rent,
+- base rent,
+- strong rent,
+- underwriting rent,
+- rent confidence,
+- market rent vs legal rent distinction.
+
+## Acceptance criteria
+- User can add comps.
+- App shows rent confidence.
+- Weak comp evidence reduces ranking confidence.
+- Rent sensitivity table appears for top properties.
+Phase 5 — Negotiation engine
+# Phase 5 — Negotiation Engine
+
+## Goal
+Implement price sensitivity and offer strategy.
+
+## Package
+`packages/negotiation-engine`
+
+## Inputs
+- asking price,
+- financial model,
+- stress results,
+- risks,
+- listing age,
+- data quality,
+- OMC/RTB/BER flags,
+- user negotiation aggressiveness.
+
+## Outputs
+- price sensitivity table,
+- opening offer,
+- target price,
+- stretch price,
+- walk-away,
+- acceptance probability,
+- DD findings that increase/decrease offer,
+- agent message.
+
+## Rules
+- Use 30% tax central case.
+- Offer amounts rounded to nearest €500/€1,000.
+- No false precision.
+- Aggressive offers require evidence: stale listing, BER issue, OMC risk, weak stress, rent uncertainty.
+- New clean listings should not assume large discount.
+- OMC unresolved and RTB unresolved should lower offer or trigger conditional/no-offer.
+
+## Acceptance criteria
+- Price sensitivity generated at asking, -2.5%, -5%, -7.5%, -10%.
+- Offer amounts are rounded.
+- Walk-away price is logical and consistent across UI.
+- Agent script is generated from real risks only.
+Phase 6 — Multi-property comparison
+# Phase 6 — Comparison Dashboard
+
+## Goal
+Let users compare 2–20 saved properties.
+
+## Views
+1. Simple ranked table
+2. Full comparison table
+3. Rankings by objective
+
+## Rankings
+- Best clean confirmed candidate
+- Highest cash flow
+- Best stress resilience
+- Best yield
+- Best negotiation opportunity
+- Best 1-bed
+- Best 2-bed
+- Best upside if OMC/RTB clears
+- Avoid / weak candidates
+
+## Required columns
+- property,
+- price,
+- rent,
+- mortgage,
+- monthly CF at 30%,
+- economic ROI at 30%,
+- stress #9,
+- stress category,
+- data quality,
+- legal rent confidence,
+- OMC risk,
+- BER risk,
+- verdict,
+- offer target.
+
+## Acceptance criteria
+- User can compare at least 5 properties.
+- Ranking changes when assumptions change.
+- Unconfirmed/watchlist properties do not enter primary ranking.
+- Objective-specific rankings are distinct.
+Phase 7 — AI extraction from URL
+# Phase 7 — URL Extraction with User Confirmation
+
+## Goal
+Allow user to paste Daft/MyHome/property listing URL and have AI/extractor pre-fill property facts.
+
+## Flow
+1. User pastes URL.
+2. App fetches page if permitted.
+3. Extract listing facts.
+4. AI parses messy text if needed.
+5. User sees fact confirmation screen.
+6. User edits/approves.
+7. Analysis runs.
+
+## Important
+Do not silently trust extraction.
+Do not rely on scraping if blocked.
+If extraction fails, fall back to manual entry.
+
+## Extracted fields
+- listing URL,
+- listing ID,
+- address,
+- development,
+- price,
+- beds,
+- baths,
+- size,
+- BER,
+- parking,
+- service charge,
+- tenancy,
+- agent,
+- date listed,
+- description.
+
+## Acceptance criteria
+- Extraction errors are visible.
+- Unknown fields are labelled.
+- User confirmation required before analysis.
+- No auto-ranked property enters comparison without confirmation.
+Phase 8 — AI narrative/report generator
+# Phase 8 — AI Report Narrative
+
+## Goal
+Generate readable simple and full reports from deterministic model outputs.
+
+## Inputs to AI
+- confirmed property facts,
+- financial outputs,
+- rent comps,
+- scores,
+- stress results,
+- risk flags,
+- negotiation outputs,
+- data quality.
+
+## AI outputs
+- executive summary,
+- risk narrative,
+- rent confidence explanation,
+- OMC/BER/RTB warnings,
+- negotiation rationale,
+- what to do next.
+
+## Guardrails
+AI must not alter computed numbers.
+AI must not upgrade a conditional property to Buy.
+AI must use uncertainty language.
+AI must avoid advice language.
+
+## Acceptance criteria
+- Report narrative matches numbers.
+- No hallucinated calculations.
+- Missing evidence is clearly stated.
+- Export to Markdown works.
+Phase 9 — Report export
+# Phase 9 — Export
+
+## Goal
+Allow exporting:
+- single-property report,
+- multi-property comparison,
+- due diligence checklist,
+- negotiation brief.
+
+## Formats
+- Markdown first
+- PDF later
+
+## Acceptance criteria
+- Exported report includes assumptions, numbers, risks, and disclaimers.
+- User can share report with advisor/broker/solicitor.
+Phase 10 — Monitoring later, not MVP
+# Phase 10 — Future Monitoring
+
+Do not build in v1.
+
+Later:
+- Daft/MyHome email alert ingestion,
+- unique forwarding inbox,
+- seen listings database,
+- daily new listing screen,
+- weekly shortlist refresh,
+- alert summary.
+
+Monitoring should only run after:
+- manual underwriting works,
+- URL extraction works,
+- comparison dashboard works,
+- report export works.
+Database schema draft
+users
+- id
+- email
+- created_at
+
+investor_profiles
+- id
+- user_id
+- name
+- cash_deployed
+- mortgage_rate
+- mortgage_term_years
+- central_tax_rate
+- tax_rates_json
+- vacancy_months
+- management_mode
+- target_regions_json
+- risk_preference
+- created_at
+- updated_at
+
+properties
+- id
+- user_id
+- profile_id
+- listing_url
+- listing_id
+- title
+- address
+- development
+- micro_location
+- county
+- postal_district
+- asking_price
+- beds
+- baths
+- size_m2
+- ber
+- floor
+- parking
+- balcony_terrace
+- service_charge
+- service_charge_status
+- tenancy_status
+- previous_rent
+- agent
+- date_listed
+- status
+- data_quality_score
+- created_at
+- updated_at
+
+property_sources
+- id
+- property_id
+- field_name
+- value
+- source_type
+- source_url
+- confidence
+- needs_confirmation
+
+rent_comps
+- id
+- property_id
+- source_url
+- address
+- rent_monthly
+- beds
+- baths
+- size_m2
+- ber
+- parking
+- comp_tier
+- adjustment_notes
+- relevance_score
+
+financial_analyses
+- id
+- property_id
+- assumptions_json
+- total_acquisition_cost
+- mortgage_required
+- monthly_mortgage
+- annual_mortgage
+- year_one_interest
+- year_one_principal
+- base_rent
+- vacancy_adjusted_rent
+- monthly_cf_20
+- monthly_cf_30
+- monthly_cf_40
+- eco_roi_20
+- eco_roi_30
+- eco_roi_40
+- roi_2pct_30
+- roi_4pct_30
+- dscr
+- break_even_rent
+- created_at
+
+stress_results
+- id
+- analysis_id
+- scenario_id
+- scenario_name
+- monthly_cash_flow
+- dscr
+- resilience_category
+
+risk_scores
+- id
+- property_id
+- location_score
+- safety_score
+- recession_resilience_score
+- tenant_demand_score
+- rent_confidence_score
+- legal_rent_score
+- building_quality_score
+- omc_score
+- ber_score
+- service_charge_score
+- capex_score
+- layout_score
+- parking_score
+- resale_score
+- operational_hassle_score
+- overall_score
+- weighted_score
+
+negotiation_outputs
+- id
+- property_id
+- opening_offer
+- target_price
+- stretch_price
+- walkaway_price
+- acceptance_probability
+- rationale
+- agent_script
+
+reports
+- id
+- user_id
+- profile_id
+- report_type
+- title
+- markdown
+- created_at
+Initial test fixtures
+
+Create 3–5 sample properties based on known patterns:
+
+Clean 2-bed D4, B3, confirmed service charge.
+Premium 1-bed D4/Gasworks, C3, estimated service charge.
+2-bed GCD with OMC risk.
+Compact 2-bed IFSC with unknown tenancy.
+BER D1 one-bed requiring upgrade.
+
+For each fixture, create expected outputs:
+
+mortgage,
+monthly CF at 30%,
+eco ROI at 30%,
+stress #9,
+data quality score,
+verdict.
+Definition of MVP success
+
+The MVP is successful when:
+
+A user can create an investor profile.
+A user can enter or import 5 Dublin properties.
+The app calculates mortgage, cash flow, ROI, tax sensitivity, and stress tests correctly.
+The app distinguishes confirmed, estimated, and unknown data.
+The app produces data quality scores.
+The app ranks properties by yield, resilience, and overall risk-adjusted attractiveness.
+The app generates realistic negotiation ranges.
+The app exports a shareable report.
+The app avoids the known failure modes:
+wrong location label,
+missing size,
+weak rent comps treated as strong,
+BER treated as legal rent cap,
+20% tax treated as central non-resident case,
+OMC called clean without documents,
+unconfirmed properties ranked with confirmed properties,
+overly precise negotiation numbers,
+high yield over-ranked despite weak evidence.
+
+If all nine are true, v1 is ready for private user testing.
+
+
+---
+
+## Final improved framing
+
+The product you are building is not primarily a report generator. It is a **decision-control system** for property investors.
+
+The core promise should be:
+
+> “Stop relying on gut feel. Underwrite every Irish property the same way: rent evidence, mortgage burden, tax sensitivity, stress resilience, legal/OMC/BER risks, and negotiation price.”
+
+For MVP, the killer use case is:
+
+> “Paste or enter five Dublin property listings and get a ranked, auditable buy-to-let shortlist showing what is worth viewing, what is risky, what price makes each deal work, and what evidence must be verified before offering.”
+
+That is specific enough to build, test, and improve sequentially.

@@ -1,0 +1,8 @@
+{
+  "name": "property-underwriter",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
