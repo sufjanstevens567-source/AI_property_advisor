@@ -15,8 +15,10 @@ Write-Host "OK: SKILL.md"
 # Copy reference files
 $refs = @(
     "audit_checklist.md",
+    "due_diligence_checklist.md",
     "financial_model_formulas.md",
     "negotiation_module.md",
+    "property_input_template.md",
     "scoring_rubric.md"
 )
 

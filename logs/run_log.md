@@ -4,3 +4,4 @@
 |---|---:|---:|---:|---:|---:|---:|---|---|
 | 2026-05-17 | 0 | 0 | 0 | 0 | 0 | 0 | None — label empty, no Daft alerts received yet | No |
 | 2026-05-18 | 0 | 0 | 0 | 0 | 0 | 0 | None — label still empty; no new Daft alerts in last 24h or last 7d | No |
+| 2026-05-19 | 0 | 0 | 0 | 0 | 0 | 0 | None — label empty for third consecutive day; saved-search alert likely not configured | No |

@@ -130,6 +130,6 @@ export function calculateNegotiationStrategy(inputs: NegotiationInputs): Negotia
     priceSensitivity,
     ddFindingsThatDecreaseOffer,
     ddFindingsThatIncreaseOffer,
-    agentScript: `Hi [Agent],\n\nI am interested in the property and have screened it as a rental investment using current rent, service-charge, tax, and mortgage assumptions.${riskLine}\n\nSubject to the documents checking out, I would like to open around EUR ${openingPrice.toLocaleString("en-IE")}. The offer can move toward EUR ${targetPrice.toLocaleString("en-IE")} if the missing evidence supports the assumptions.\n\nBefore finalising, could you please share the owners' management company pack, current service charge, tenancy status, and any available rent history?`,
+    agentScript: `Hi,\n\nI am interested in the property and have reviewed it as a potential rental investment.${riskLine}\n\nSubject to the documents checking out, I would like to open around EUR ${openingPrice.toLocaleString("en-IE")}. The offer can move toward EUR ${targetPrice.toLocaleString("en-IE")} if the outstanding items above are confirmed.\n\nWould you be able to share the owners' management company pack, current service charge, tenancy status, and any available rent history?\n\nI look forward to hearing from you.\n\nBest regards`,
   };
 }

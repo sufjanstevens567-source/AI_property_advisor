@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -365,11 +366,11 @@ function weakestCompTier(comps: RentComp[]): "A" | "B" | "C" | "D" | "None" {
 
 function compTierLabel(tier: RentComp["tier"] | "None"): string {
   const labels = {
-    A: "Same building",
-    B: "Same development",
-    C: "Same local area",
-    D: "Broader area",
-    None: "No rental evidence yet",
+    A: "Located in the exact same building",
+    B: "Located in the same development",
+    C: "Located in the same local street or neighborhood",
+    D: "Located in the broader surrounding area",
+    None: "No matching rental proof added yet",
   };
 
   return labels[tier];
@@ -377,12 +378,12 @@ function compTierLabel(tier: RentComp["tier"] | "None"): string {
 
 function readableRisk(risk: string): string {
   const labels: Record<string, string> = {
-    OMC: "Management company documents",
-    RTB: "Rent history / legal rent",
-    BER: "Energy rating upgrade",
-    "Service charge": "Annual management charge",
-    "Rent evidence": "Similar rental evidence",
-    Tenancy: "Tenancy status",
+    OMC: "Unconfirmed building management company records",
+    RTB: "Unconfirmed tenancy history and legal rent caps",
+    BER: "Poor energy efficiency or heating upgrade risks",
+    "Service charge": "Unverified building maintenance fees",
+    "Rent evidence": "Lack of similar nearby rental proof",
+    Tenancy: "Unconfirmed current tenant status",
   };
 
   return labels[risk] ?? risk;
@@ -390,6 +391,15 @@ function readableRisk(risk: string): string {
 
 function readableRisks(risks: string[]): string {
   return risks.map(readableRisk).join(", ");
+}
+
+function verdictLabel(verdict: string): string {
+  const labels: Record<string, string> = {
+    Buy: "Ready to Offer (Safe)",
+    "Conditional Buy": "Caution (Verify First)",
+    Avoid: "High Risk (Avoid)",
+  };
+  return labels[verdict] ?? verdict;
 }
 
 function analyseProperty(property: PropertyRecord, assumptions: InvestorAssumptions, overrideRate?: number) {
@@ -483,69 +493,176 @@ function riskColor(value: number): string {
   return "text-red-700";
 }
 
+function verdictBorderColor(verdict: string): string {
+  if (verdict === "Buy") return "border-l-emerald-600";
+  if (verdict === "Avoid") return "border-l-red-500";
+  return "border-l-amber-500";
+}
+
+function verdictBadgeClasses(verdict: string): string {
+  if (verdict === "Buy") return "bg-emerald-100 text-emerald-800 border-emerald-200";
+  if (verdict === "Avoid") return "bg-red-100 text-red-800 border-red-200";
+  return "bg-amber-100 text-amber-800 border-amber-200";
+}
+
+function resilienceLabel(category: string): string {
+  const labels: Record<string, string> = {
+    Robust: "Strong safety margin",
+    Good: "Comfortable safety margin",
+    "Thin but positive": "Narrow safety margin",
+    Weak: "Loses money under stress",
+    Fragile: "Severe losses under stress",
+  };
+  return labels[category] ?? category;
+}
+
 function reportMarkdown(property: PropertyRecord, analysis: ReturnType<typeof analyseProperty>, vacancyLimit: number): string {
-  return `# Underwriting Report: ${property.name}
+  const riskBullets = analysis.unresolvedRisks.length > 0
+    ? analysis.unresolvedRisks.map(r => `- ${readableRisk(r)}`).join("\n")
+    : "- All crucial facts have been verified";
 
-## 1. Decision Summary
+  const narrativeOpening = `${property.name || "This property"} earns an expected ${euro(analysis.baseCashFlow)} per month after tax. Under worst-case stress conditions (higher interest rates, vacancy, and rising costs), this drops to ${euro(analysis.combined.monthlyCashFlow)} per month \u2014 a ${resilienceLabel(analysis.combined.resilienceCategory).toLowerCase()}. ${
+    analysis.unresolvedRisks.length > 0
+      ? `Before making an offer, the following items need to be independently verified: ${analysis.unresolvedRisks.map(readableRisk).join(", ")}.`
+      : "All critical facts are verified and the property is ready for an offer."
+  }`;
 
-**Decision:** ${analysis.verdict === "Buy" ? "Strong candidate" : analysis.verdict === "Conditional Buy" ? "Conditional candidate" : analysis.verdict}
+  const today = new Date().toLocaleDateString("en-IE", { day: "numeric", month: "long", year: "numeric" });
 
-**Asking price:** ${euro(property.askingPrice)}
+  return `# Property Underwriting Report: ${property.name}
 
-**Monthly cash flow after 30% tax:** ${euro(analysis.baseCashFlow)}
+> Generated on ${today}. Model assumes: ${(analysis.financial.ltv * 100).toFixed(0)}% mortgage at ${((analysis.financial.yearOneInterest / analysis.financial.mortgageRequired) * 100).toFixed(2) || "5.65"}% interest, ${vacancyLimit > 0 ? `${vacancyLimit.toFixed(1)} months` : "standard"} vacancy tolerance.${property.listingUrl ? ` Listing: ${property.listingUrl}` : ""}
 
-**Combined downside cash flow:** ${euro(analysis.combined.monthlyCashFlow)} per month (${analysis.combined.resilienceCategory})
+---
 
-**Data confidence:** ${analysis.scores.dataQualityScore}/10 (${analysis.scores.rankingConfidence})
+## The Bottom Line
 
-**Main items to verify:** ${readableRisks(analysis.unresolvedRisks) || "Standard property documents"}
+**Decision:** ${verdictLabel(analysis.verdict)}
 
-This is screening and scenario analysis, not investment advice. Verify assumptions with a solicitor, tax advisor, broker, surveyor, and owners' management company documentation before making an offer.
+${narrativeOpening}
 
-## 2. Property & Listing Facts
+| Metric | Value |
+|:---|:---|
+| Asking price | ${euro(property.askingPrice)} |
+| Expected monthly profit | ${euro(analysis.baseCashFlow)} |
+| Worst-case monthly profit | ${euro(analysis.combined.monthlyCashFlow)} (${resilienceLabel(analysis.combined.resilienceCategory)}) |
+| Data completeness | ${analysis.scores.dataQualityScore}/10 (${analysis.scores.rankingConfidence}) |
 
-${property.address}. ${property.beds} bed / ${property.baths} bath, ${property.sizeSqm || "unknown"} sqm, energy rating (BER) ${property.ber}. Annual management/service charge status: ${property.serviceChargeStatus}. Tenancy status: ${property.tenancyStatus}.
+**Items to verify before making an offer:**
 
-## 3. Financial Model
+${riskBullets}
 
-- Total acquisition cost: ${euro(analysis.financial.totalAcquisitionCost)}
-- Mortgage required: ${euro(analysis.financial.mortgageRequired)}
-- Monthly mortgage: ${euro(analysis.financial.monthlyMortgagePayment)}
-- Minimum rent needed to avoid losing cash: ${euro(analysis.financial.breakEvenRent)} per month
-- Empty-month cushion before cash flow turns negative: ${vacancyLimit.toFixed(1)} months
-- Estimated annual return at 30% tax: ${pct(analysis.financial.economicRoiByTaxRate[analysis.centralKey])}
+> This is screening and scenario analysis, not investment advice. Verify assumptions with a solicitor, tax advisor, broker, surveyor, and management company documentation before making an offer.
 
-## 4. Rent Evidence & Confidence
+---
 
-Confidence in the rent estimate is **${analysis.rentConfidence}**. Weak rental evidence reduces ranking confidence until same-building, same-development, or multiple same-area rental examples are entered.
+## About This Property
 
-## 5. Stress Tests & Sensitivity
+| Detail | Value |
+|:---|:---|
+| Address | ${property.address} |
+| Bedrooms / Bathrooms | ${property.beds} / ${property.baths} |
+| Size | ${property.sizeSqm || "Unknown"} square meters |
+| Energy rating | ${property.ber} (on a scale of A to G, where A is most efficient) |
+| Yearly building upkeep fee | ${property.serviceChargeStatus === "Confirmed" ? "Confirmed" : `${property.serviceChargeStatus} (not yet verified)`} |
+| Current occupancy | ${property.tenancyStatus} |
 
-The combined downside test applies rent -10%, costs +25%, two months empty, and a 7% mortgage rate. The severe downside test applies rent -15%, costs +25%, three months empty, and an 8% rate.
+---
 
-## 6. Qualitative Risk Scoring
+## The Numbers
 
-Overall risk score: **${analysis.scores.overallRiskAdjustedScore}/10**.
+| Metric | Value |
+|:---|:---|
+| Total upfront cash needed to buy | ${euro(analysis.financial.totalAcquisitionCost)} |
+| Mortgage loan amount | ${euro(analysis.financial.mortgageRequired)} |
+| Monthly mortgage payment | ${euro(analysis.financial.monthlyMortgagePayment)} |
+| Minimum rent needed to avoid losing money | ${euro(analysis.financial.breakEvenRent)} per month |
+| Empty-month safety cushion | ${vacancyLimit.toFixed(1)} months (how long it can sit empty before you lose money) |
+| Estimated annual return at 30% tax | ${pct(analysis.financial.economicRoiByTaxRate[analysis.centralKey])} |
 
-Risk flags:
-${analysis.scores.riskFlags.map(flag => `- ${flag}`).join("\n") || "- No automatic scoring flags."}
+---
 
-## 7. Negotiation Strategy
+## How Confident Is the Rent?
 
-- Opening offer: ${euro(analysis.negotiation.openingPrice)}
-- Target price: ${euro(analysis.negotiation.targetPrice)}
-- Highest acceptable price: ${euro(analysis.negotiation.stretchPrice)}
-- Maximum price: ${euro(analysis.negotiation.walkAwayPrice)}
-- Estimated chance the seller accepts: ${analysis.negotiation.acceptanceProbability}
+Confidence in the rent estimate is **${analysis.rentConfidence}**.
 
-${analysis.negotiation.agentScript}
+${analysis.rentConfidence === "Low"
+    ? "Weak rental evidence reduces confidence in the projection. To strengthen this, add same-building, same-development, or multiple same-area rental examples."
+    : analysis.rentConfidence === "Medium"
+      ? "Moderate rental evidence supports the estimate. Adding same-building comparables would increase confidence further."
+      : "Strong rental evidence supports the estimate, backed by nearby verified rental data."}
 
-## 8. Documents To Verify
+---
 
-- Request owners' management company accounts, meeting notes, repair reserve balance, insurance schedule, and levy history.
-- Verify rent history and that the modelled rent is legally chargeable.
-- Confirm service charge, energy-rating certificate, survey findings, and lender comfort.
-- Re-run the model after any rent, service-charge, management-company, energy-rating, or price changes.`;
+## What If Things Go Wrong?
+
+This section tests whether the property survives realistic adversity.
+
+| Stress Scenario | Monthly Result | Safety Rating |
+|:---|:---|:---|
+| Combined downside (10% lower rent, 25% higher costs, 2 months empty, 7% interest rate) | ${euro(analysis.combined.monthlyCashFlow)} | ${resilienceLabel(analysis.combined.resilienceCategory)} |
+| Severe downside (15% lower rent, 25% higher costs, 3 months empty, 8% interest rate) | ${euro(analysis.severe.monthlyCashFlow)} | ${resilienceLabel(analysis.severe.resilienceCategory)} |
+
+${analysis.combined.monthlyCashFlow > 0
+    ? `Under the worst realistic scenario, this property still earns ${euro(analysis.combined.monthlyCashFlow)} per month \u2014 meaning it survives significant adversity.`
+    : `Under the worst realistic scenario, this property loses ${euro(Math.abs(analysis.combined.monthlyCashFlow))} per month \u2014 meaning it does not survive a major downturn without additional cash from the investor.`}
+
+${analysis.severe.monthlyCashFlow > 0
+    ? `Even under the most extreme scenario tested, the property remains profitable at ${euro(analysis.severe.monthlyCashFlow)} per month.`
+    : `Under the most extreme scenario tested, the property loses ${euro(Math.abs(analysis.severe.monthlyCashFlow))} per month.`}
+
+---
+
+## Risk Profile
+
+Overall risk score: **${analysis.scores.overallRiskAdjustedScore}/10** (higher is safer).
+
+**Specific risk flags detected:**
+
+${analysis.scores.riskFlags.map(flag => `- ${flag}`).join("\n") || "- No automatic safety flags detected."}
+
+---
+
+## Making an Offer
+
+| Step | Price | Notes |
+|:---|:---|:---|
+| Starting offer | ${euro(analysis.negotiation.openingPrice)} | Your opening price to the seller |
+| Fair price | ${euro(analysis.negotiation.targetPrice)} | Fair price based on building quality |
+| Maximum (if all documents check out) | ${euro(analysis.negotiation.stretchPrice)} | Highest price if management company files, rent history, and energy rating are all clean |
+| Do not pay more than | ${euro(analysis.negotiation.walkAwayPrice)} | Absolute walk-away limit |
+
+Estimated seller acceptance chance: **${analysis.negotiation.acceptanceProbability}**
+
+---
+
+### Draft email to the estate agent
+
+> ${analysis.negotiation.agentScript.replace(/\n/g, "\n> ")}
+
+---
+
+## Your Checklist
+
+**Before making any offer:**
+
+- Request management company accounts, meeting notes, repair reserve balance, insurance schedule, and levy history
+- Verify rent history and confirm that the expected rent is legally chargeable under current rules
+- Confirm the yearly building upkeep fee and check for any planned increases
+
+**During the buying process:**
+
+- Obtain the energy-rating certificate and confirm any required heating or insulation upgrades
+- Commission a building survey and confirm findings align with the modelled repair budget
+- Confirm mortgage lender comfort with the property, building, and management company
+
+**After completing all checks:**
+
+- Re-run this model with any updated numbers (rent, upkeep fees, energy rating, price changes) to verify the investment still works
+
+---
+
+*Generated by Irish Rental Property Underwriter on ${today}. This is scenario analysis, not investment advice.*`;
 }
 
 export default function Home() {
@@ -561,6 +678,7 @@ export default function Home() {
     expectedRent: 2350,
     annualServiceCharge: 2200,
   });
+  const [isCopied, setIsCopied] = useState(false);
   const [sliderRate, setSliderRate] = useState(defaultAssumptions.mortgageRate);
   const rentalMatchId = useId();
   const mortgageStressSliderId = useId();
@@ -664,12 +782,12 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-muted/30 text-foreground">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6">
-        <header className="flex flex-col gap-3 border-b pb-5 md:flex-row md:items-end md:justify-between">
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-8">
+        <header className="flex flex-col gap-3 border-b border-border/60 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-medium text-muted-foreground">Check the risks before chasing returns</p>
-            <h1 className="text-3xl font-semibold tracking-normal">Irish Rental Property Underwriter</h1>
+            <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase" style={{letterSpacing: '0.08em'}}>Check the risks before chasing returns</p>
+            <h1 className="mt-1 text-4xl tracking-tight" style={{fontFamily: 'var(--font-serif)'}}>Irish Rental Property Underwriter</h1>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setStep("dashboard")}>Dashboard</Button>
@@ -680,109 +798,196 @@ export default function Home() {
           </div>
         </header>
 
-        {step !== "dashboard" && (
-          <div className="grid gap-2 rounded-lg border bg-card p-3 text-xs text-muted-foreground md:grid-cols-5">
-            {[
-              ["setup", "1. Your buying assumptions"],
-              ["entry", "2. Property details"],
-              ["comps", "3. Similar rentals"],
-              ["confirm", "4. Check facts"],
-              ["analysis", "5. Analysis"],
-            ].map(([id, label]) => (
-              <div
-                key={id}
-                className={`rounded-md px-3 py-2 ${step === id ? "bg-foreground text-background" : "bg-background"}`}
-              >
-                {label}
-              </div>
-            ))}
-          </div>
-        )}
+        {step !== "dashboard" && (() => {
+          const steps: [Step, string][] = [
+            ["setup", "1. Your buying setup"],
+            ["entry", "2. Property details"],
+            ["comps", "3. Similar rentals"],
+            ["confirm", "4. Check facts"],
+            ["analysis", "5. Analysis"],
+          ];
+          const stepOrder: Step[] = steps.map(s => s[0]);
+          const currentIdx = stepOrder.indexOf(step);
+          return (
+            <div className="flex flex-nowrap overflow-x-auto hide-scrollbar snap-x snap-mandatory gap-2 rounded-xl border border-border/50 bg-card p-3 text-sm md:text-xs text-muted-foreground md:grid md:grid-cols-5">
+              {steps.map(([id, label], idx) => {
+                const isCompleted = idx < currentIdx;
+                const isCurrent = id === step;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => setStep(id)}
+                    className={`shrink-0 snap-center min-w-[140px] md:min-w-0 rounded-md px-4 py-2.5 md:px-3 md:py-2 text-left transition-colors ${
+                      isCurrent
+                        ? "bg-foreground text-background font-medium"
+                        : isCompleted
+                          ? "bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                          : "bg-background hover:bg-muted"
+                    }`}
+                  >
+                    {isCompleted ? "\u2713 " : ""}{label}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {step === "dashboard" && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <Card>
-              <CardHeader>
+            {/* Onboarding card */}
+            <div className="lg:col-span-2 rounded-xl border border-border/50 bg-card p-5">
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                This tool checks whether a rental property will make or lose money under realistic and worst-case conditions. Explore the sample properties below, use the quick calculator on the right, or click <strong>Add Property</strong> to analyse your own.
+              </p>
+            </div>
+
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="border-b border-border/40 pb-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <CardTitle>Comparison Dashboard</CardTitle>
-                    <CardDescription>Confirmed properties rank by downside protection before upside.</CardDescription>
+                    <CardTitle style={{fontFamily: 'var(--font-serif)'}} className="text-xl">Comparison Dashboard</CardTitle>
+                    <CardDescription className="mt-1">Properties ranked by downside protection before upside.</CardDescription>
                   </div>
-                  <select
-                    className="h-9 rounded-lg border bg-background px-3 text-sm"
-                    value={sortBy}
-                    onChange={event => setSortBy(event.target.value as SortMode)}
-                  >
-                    <option value="resilience">Combined downside resilience</option>
-                    <option value="overall">Overall score</option>
-                    <option value="cashflow">Monthly cash flow</option>
-                    <option value="yield">Estimated annual return</option>
-                    <option value="clean">Clean candidates</option>
-                  </select>
+                </div>
+                {/* Sort pills */}
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {([
+                    ["resilience", "Worst-case safety"],
+                    ["overall", "Overall score"],
+                    ["cashflow", "Monthly profit"],
+                    ["yield", "Annual return"],
+                    ["clean", "Low-risk"],
+                  ] as [SortMode, string][]).map(([id, label]) => (
+                    <button
+                      key={id}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                        sortBy === id
+                          ? "bg-foreground text-background"
+                          : "bg-background text-muted-foreground hover:bg-muted"
+                      }`}
+                      onClick={() => setSortBy(id)}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Property</TableHead>
-                      <TableHead>Price</TableHead>
-                      <TableHead>Cash flow after tax</TableHead>
-                      <TableHead>Combined downside</TableHead>
-                      <TableHead>Empty-month cushion</TableHead>
-                      <TableHead>Data confidence</TableHead>
-                      <TableHead>Decision</TableHead>
-                      <TableHead></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dashboardRows.map(row => (
-                      <TableRow key={row.property.id}>
-                        <TableCell>
-                          <div className="font-medium">{row.property.name}</div>
-                          <div className="text-xs text-muted-foreground">{row.property.microLocation}</div>
-                        </TableCell>
-                        <TableCell>{euro(row.property.askingPrice)}</TableCell>
-                        <TableCell className={riskColor(row.analysis.baseCashFlow)}>{euro(row.analysis.baseCashFlow)}</TableCell>
-                        <TableCell>
-                          <span className={riskColor(row.analysis.combined.monthlyCashFlow)}>
-                            {euro(row.analysis.combined.monthlyCashFlow)}
-                          </span>
-                          <Badge variant="outline" className="ml-2">{row.analysis.combined.resilienceCategory}</Badge>
-                        </TableCell>
-                        <TableCell>{row.vacancyLimit.toFixed(1)} months</TableCell>
-                        <TableCell>{row.analysis.scores.dataQualityScore}/10</TableCell>
-                        <TableCell>
-                          <Badge variant={row.analysis.verdict === "Buy" ? "default" : row.analysis.verdict === "Avoid" ? "destructive" : "secondary"}>
-                            {row.analysis.verdict}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="outline" size="sm" onClick={() => loadProperty(row.property.id)}>View analysis</Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                {dashboardRows.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <p className="text-muted-foreground">No properties yet.</p>
+                    <Button className="mt-3" onClick={() => { setProperty({ ...starterProperties[0], id: `property-${Date.now()}`, name: "" }); setStep("setup"); }}>Add your first property</Button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Desktop Table */}
+                    <div className="hidden md:block">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-8">#</TableHead>
+                            <TableHead>Property</TableHead>
+                            <TableHead>Asking price</TableHead>
+                            <TableHead>Expected profit</TableHead>
+                            <TableHead>Worst-case result</TableHead>
+                            <TableHead>Verdict</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {dashboardRows.map((row, index) => (
+                            <TableRow
+                              key={row.property.id}
+                              className={`cursor-pointer border-l-4 ${verdictBorderColor(row.analysis.verdict)} hover:bg-muted/40 transition-colors`}
+                              onClick={() => loadProperty(row.property.id)}
+                            >
+                              <TableCell className="font-medium text-muted-foreground">{index + 1}</TableCell>
+                              <TableCell>
+                                <div className="font-medium">{row.property.name}</div>
+                                <div className="text-xs text-muted-foreground">{row.property.microLocation}</div>
+                              </TableCell>
+                              <TableCell>{euro(row.property.askingPrice)}</TableCell>
+                              <TableCell className={riskColor(row.analysis.baseCashFlow)}>
+                                {euro(row.analysis.baseCashFlow)}/mo
+                              </TableCell>
+                              <TableCell>
+                                <span className={riskColor(row.analysis.combined.monthlyCashFlow)}>
+                                  {euro(row.analysis.combined.monthlyCashFlow)}/mo
+                                </span>
+                                <div className="mt-0.5 text-xs text-muted-foreground">{resilienceLabel(row.analysis.combined.resilienceCategory)}</div>
+                              </TableCell>
+                              <TableCell>
+                                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${verdictBadgeClasses(row.analysis.verdict)}`}>
+                                  {verdictLabel(row.analysis.verdict)}
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {/* Mobile Card Stack */}
+                    <div className="flex flex-col gap-4 md:hidden">
+                      {dashboardRows.map((row, index) => (
+                        <div 
+                          key={row.property.id}
+                          className={`flex flex-col gap-3 rounded-lg border-l-4 border-y border-r border-border/50 bg-card p-4 shadow-sm active:bg-muted/50 transition-colors ${verdictBorderColor(row.analysis.verdict)}`}
+                          onClick={() => loadProperty(row.property.id)}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-muted-foreground">#{index + 1}</span>
+                                <span className="font-semibold text-foreground">{row.property.name}</span>
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-0.5">{row.property.microLocation}</div>
+                            </div>
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium shrink-0 ml-2 ${verdictBadgeClasses(row.analysis.verdict)}`}>
+                              {verdictLabel(row.analysis.verdict)}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4 mt-1 border-t pt-3">
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Asking Price</div>
+                              <div className="font-medium text-sm mt-0.5">{euro(row.property.askingPrice)}</div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Expected Profit</div>
+                              <div className={`font-medium text-sm mt-0.5 ${riskColor(row.analysis.baseCashFlow)}`}>{euro(row.analysis.baseCashFlow)}/mo</div>
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Worst-Case Result</div>
+                              <div className={`font-medium text-sm mt-0.5 flex items-baseline gap-2 ${riskColor(row.analysis.combined.monthlyCashFlow)}`}>
+                                {euro(row.analysis.combined.monthlyCashFlow)}/mo 
+                                <span className="text-muted-foreground font-normal text-xs">{resilienceLabel(row.analysis.combined.resilienceCategory)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>First-pass estimate</CardTitle>
-                <CardDescription>Enter three numbers to get a rough cash-flow read before full underwriting.</CardDescription>
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="border-b border-border/40 pb-4">
+                <CardTitle style={{fontFamily: 'var(--font-serif)'}} className="text-xl">Quick cash flow calculator</CardTitle>
+                <CardDescription className="mt-1">Enter three simple numbers to see a quick estimate of your monthly profit before doing full research.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 pt-5">
                 <NumberField label="Asking price" value={quickTriage.askingPrice} onChange={value => setQuickTriage({ ...quickTriage, askingPrice: value })} />
-                <NumberField label="Expected rent per month" value={quickTriage.expectedRent} onChange={value => setQuickTriage({ ...quickTriage, expectedRent: value })} />
-                <NumberField label="Annual management/service charge" value={quickTriage.annualServiceCharge} onChange={value => setQuickTriage({ ...quickTriage, annualServiceCharge: value })} />
-                <div className="rounded-lg border bg-background p-4">
-                  <div className="text-sm text-muted-foreground">Rough monthly cash flow after 30% tax</div>
-                  <div className={`mt-1 text-3xl font-semibold ${riskColor(quickResult.monthlyCashFlowByTaxRate[quickKey])}`}>
+                <NumberField label="Expected monthly rent" value={quickTriage.expectedRent} onChange={value => setQuickTriage({ ...quickTriage, expectedRent: value })} />
+                <NumberField label="Yearly building upkeep fees (service charge)" value={quickTriage.annualServiceCharge} onChange={value => setQuickTriage({ ...quickTriage, annualServiceCharge: value })} />
+                <div className="rounded-xl border border-border/50 bg-accent/40 p-4">
+                  <div className="text-xs font-medium tracking-widest text-muted-foreground uppercase">Estimated monthly profit after income tax</div>
+                  <div className={`mt-2 text-3xl font-semibold tracking-tight ${riskColor(quickResult.monthlyCashFlowByTaxRate[quickKey])}`}>
                     {euro(quickResult.monthlyCashFlowByTaxRate[quickKey])}/mo
                   </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Uses default costs. Treat this as a screening estimate until the property facts, rent evidence, and documents are checked.
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Uses typical default expenses. This is just a quick estimate until you verify the building details, tenancy laws, and actual rental proof.
                   </p>
                 </div>
               </CardContent>
@@ -793,27 +998,27 @@ export default function Home() {
         {step === "setup" && (
           <Card>
             <CardHeader>
-              <CardTitle>Your buying assumptions</CardTitle>
+              <CardTitle>Your buying budget and loan details</CardTitle>
               <CardDescription>Set the shared numbers used across every property model. Defaults are safe to leave in place for a first pass.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="grid gap-4 md:grid-cols-4">
-                <NumberField label="Cash available for this purchase" value={assumptions.cashDeployed} onChange={value => setAssumptions({ ...assumptions, cashDeployed: value })} />
-                <NumberField label="Mortgage rate (%)" value={assumptions.mortgageRate * 100} step={0.05} onChange={value => setAssumptions({ ...assumptions, mortgageRate: value / 100 })} />
-                <NumberField label="Mortgage term in years" value={assumptions.mortgageTermYears} onChange={value => setAssumptions({ ...assumptions, mortgageTermYears: value })} />
-                <NumberField label="Main tax assumption (%)" value={assumptions.centralTaxRate * 100} onChange={value => setAssumptions({ ...assumptions, centralTaxRate: value / 100 })} />
+                <NumberField label="Your budget (cash upfront)" value={assumptions.cashDeployed} onChange={value => setAssumptions({ ...assumptions, cashDeployed: value })} />
+                <NumberField label="Bank interest rate (%)" value={assumptions.mortgageRate * 100} step={0.05} onChange={value => setAssumptions({ ...assumptions, mortgageRate: value / 100 })} />
+                <NumberField label="Length of mortgage loan (years)" value={assumptions.mortgageTermYears} onChange={value => setAssumptions({ ...assumptions, mortgageTermYears: value })} />
+                <NumberField label="Your income tax bracket (%)" value={assumptions.centralTaxRate * 100} onChange={value => setAssumptions({ ...assumptions, centralTaxRate: value / 100 })} />
               </div>
               <details className="rounded-lg border bg-background p-4">
                 <summary className="cursor-pointer text-sm font-medium">Advanced assumptions</summary>
                 <div className="mt-4 grid gap-4 md:grid-cols-3">
                   <NumberField label="Expected empty months per year" value={assumptions.vacancyMonthsBase} step={0.5} onChange={value => setAssumptions({ ...assumptions, vacancyMonthsBase: value })} />
-                  <NumberField label="Management fee (%)" value={(assumptions.managementFeePct || 0) * 100} step={0.5} onChange={value => setAssumptions({ ...assumptions, managementFeePct: value / 100 })} />
-                  <NumberField label="Downside mortgage-rate reference (%)" value={7} disabled onChange={() => undefined} />
+                  <NumberField label="Yearly rental agency fee (%)" value={(assumptions.managementFeePct || 0) * 100} step={0.5} onChange={value => setAssumptions({ ...assumptions, managementFeePct: value / 100 })} />
+                  <NumberField label="Stress test interest rate reference (%)" value={7} disabled onChange={() => undefined} />
                 </div>
               </details>
               <div className="flex justify-between">
                 <Button variant="outline" onClick={() => setStep("dashboard")}>Back</Button>
-                <Button onClick={() => setStep("entry")}>Next: Property Details</Button>
+                <Button onClick={() => setStep("entry")}>Next: Enter Property Information</Button>
               </div>
             </CardContent>
           </Card>
@@ -822,52 +1027,52 @@ export default function Home() {
         {step === "entry" && (
           <Card>
             <CardHeader>
-              <CardTitle>Add property details</CardTitle>
+              <CardTitle>Enter property information</CardTitle>
               <CardDescription>Capture the facts, how certain they are, and any risks that should change the decision.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="grid gap-4 md:grid-cols-3">
                 <TextField label="Property name" value={property.name} onChange={value => updateProperty("name", value)} />
-                <TextField label="Listing URL" value={property.listingUrl} onChange={value => updateProperty("listingUrl", value)} />
-                <NumberField label="Days on market" value={property.daysOnMarket} onChange={value => updateProperty("daysOnMarket", value)} />
+                <TextField label="Property website link" value={property.listingUrl} onChange={value => updateProperty("listingUrl", value)} />
+                <NumberField label="Days listed online" value={property.daysOnMarket} onChange={value => updateProperty("daysOnMarket", value)} />
                 <TextField label="Address" value={property.address} onChange={value => updateProperty("address", value)} />
-                <TextField label="Exact local area" value={property.microLocation} onChange={value => updateProperty("microLocation", value)} />
-                <StatusField label="Local-area confidence" value={property.microLocationStatus} onChange={value => updateProperty("microLocationStatus", value)} />
+                <TextField label="Specific street or block" value={property.microLocation} onChange={value => updateProperty("microLocation", value)} />
+                <StatusField label="Street desirability confidence" value={property.microLocationStatus} onChange={value => updateProperty("microLocationStatus", value)} />
                 <NumberField label="Asking price" value={property.askingPrice} onChange={value => updateProperty("askingPrice", value)} />
-                <NumberField label="Expected rent per month" value={property.expectedRent} onChange={value => updateProperty("expectedRent", value)} />
-                <NumberField label="Annual management/service charge" value={property.annualServiceCharge} onChange={value => updateProperty("annualServiceCharge", value)} />
-                <StatusField label="Service-charge confidence" value={property.serviceChargeStatus} onChange={value => updateProperty("serviceChargeStatus", value)} />
-                <NumberField label="Beds" value={property.beds} onChange={value => updateProperty("beds", value)} />
-                <NumberField label="Baths" value={property.baths} onChange={value => updateProperty("baths", value)} />
-                <NumberField label="Size sqm" value={property.sizeSqm} onChange={value => updateProperty("sizeSqm", value)} />
-                <StatusField label="Size status" value={property.sizeStatus} onChange={value => updateProperty("sizeStatus", value)} />
-                <TextField label="Energy rating (BER)" value={property.ber} onChange={value => updateProperty("ber", value)} />
-                <StatusField label="Energy-rating confidence" value={property.berStatus} onChange={value => updateProperty("berStatus", value)} />
-                <SelectField label="Tenancy" value={property.tenancyStatus} options={["Vacant", "Tenanted", "Unknown"]} onChange={value => updateProperty("tenancyStatus", value as PropertyRecord["tenancyStatus"])} />
-                <StatusField label="Tenancy-status confidence" value={property.tenancyStatusConfidence} onChange={value => updateProperty("tenancyStatusConfidence", value)} />
-                <NumberField label="Previous rent" value={property.previousRent} onChange={value => updateProperty("previousRent", value)} />
-                <TextField label="Parking" value={property.parking} onChange={value => updateProperty("parking", value)} />
-                <TextField label="Floor" value={property.floor} onChange={value => updateProperty("floor", value)} />
-                <TextField label="Balcony / terrace" value={property.balcony} onChange={value => updateProperty("balcony", value)} />
+                <NumberField label="Expected monthly rent" value={property.expectedRent} onChange={value => updateProperty("expectedRent", value)} />
+                <NumberField label="Yearly building upkeep fees (service charge)" value={property.annualServiceCharge} onChange={value => updateProperty("annualServiceCharge", value)} />
+                <StatusField label="Upkeep fee confidence" value={property.serviceChargeStatus} onChange={value => updateProperty("serviceChargeStatus", value)} />
+                <NumberField label="Bedrooms" value={property.beds} onChange={value => updateProperty("beds", value)} />
+                <NumberField label="Bathrooms" value={property.baths} onChange={value => updateProperty("baths", value)} />
+                <NumberField label="Property size (square meters)" value={property.sizeSqm} onChange={value => updateProperty("sizeSqm", value)} />
+                <StatusField label="Size confidence" value={property.sizeStatus} onChange={value => updateProperty("sizeStatus", value)} />
+                <TextField label="Building energy rating (BER)" value={property.ber} onChange={value => updateProperty("ber", value)} />
+                <StatusField label="Energy rating confidence" value={property.berStatus} onChange={value => updateProperty("berStatus", value)} />
+                <SelectField label="Occupancy status (tenancy)" value={property.tenancyStatus} options={["Vacant", "Tenanted", "Unknown"]} onChange={value => updateProperty("tenancyStatus", value as PropertyRecord["tenancyStatus"])} />
+                <StatusField label="Occupancy confidence" value={property.tenancyStatusConfidence} onChange={value => updateProperty("tenancyStatusConfidence", value)} />
+                <NumberField label="Previous rent (for legal limit checks)" value={property.previousRent} onChange={value => updateProperty("previousRent", value)} />
+                <TextField label="Parking spaces" value={property.parking} onChange={value => updateProperty("parking", value)} />
+                <TextField label="Floor level" value={property.floor} onChange={value => updateProperty("floor", value)} />
+                <TextField label="Balcony or outdoor space" value={property.balcony} onChange={value => updateProperty("balcony", value)} />
               </div>
               <details className="rounded-lg border bg-background p-4">
-                <summary className="cursor-pointer text-sm font-medium">Advanced acquisition and operating costs</summary>
+                <summary className="cursor-pointer text-sm font-medium">Extra buying and yearly running costs</summary>
                 <div className="mt-4 grid gap-4 md:grid-cols-4">
-                  <NumberField label="Legal/setup" value={property.legalSetupCost} onChange={value => updateProperty("legalSetupCost", value)} />
-                  <NumberField label="Furnishing/setup" value={property.furnishingSetupCost} onChange={value => updateProperty("furnishingSetupCost", value)} />
-                  <NumberField label="Refurbishment" value={property.refurbishmentCost} onChange={value => updateProperty("refurbishmentCost", value)} />
-                  <NumberField label="Energy-upgrade budget" value={property.berUpgradeCost} onChange={value => updateProperty("berUpgradeCost", value)} />
-                  <NumberField label="Maintenance" value={property.annualMaintenance} onChange={value => updateProperty("annualMaintenance", value)} />
-                  <NumberField label="Insurance" value={property.annualInsurance} onChange={value => updateProperty("annualInsurance", value)} />
-                  <NumberField label="Accounting" value={property.annualAccountingCompliance} onChange={value => updateProperty("annualAccountingCompliance", value)} />
-                  <NumberField label="Letting fee amortised" value={property.annualLettingFeeAmortised} onChange={value => updateProperty("annualLettingFeeAmortised", value)} />
+                  <NumberField label="Legal fees and setup" value={property.legalSetupCost} onChange={value => updateProperty("legalSetupCost", value)} />
+                  <NumberField label="Furniture and staging" value={property.furnishingSetupCost} onChange={value => updateProperty("furnishingSetupCost", value)} />
+                  <NumberField label="Refurbishment and repairs" value={property.refurbishmentCost} onChange={value => updateProperty("refurbishmentCost", value)} />
+                  <NumberField label="Energy upgrade budget" value={property.berUpgradeCost} onChange={value => updateProperty("berUpgradeCost", value)} />
+                  <NumberField label="Yearly basic maintenance" value={property.annualMaintenance} onChange={value => updateProperty("annualMaintenance", value)} />
+                  <NumberField label="Yearly property insurance" value={property.annualInsurance} onChange={value => updateProperty("annualInsurance", value)} />
+                  <NumberField label="Yearly accounting fees" value={property.annualAccountingCompliance} onChange={value => updateProperty("annualAccountingCompliance", value)} />
+                  <NumberField label="Yearly agent tenant-finder fee" value={property.annualLettingFeeAmortised} onChange={value => updateProperty("annualLettingFeeAmortised", value)} />
                 </div>
               </details>
-              <TextField label="Management company and building risks" value={property.omcRiskNotes} onChange={value => updateProperty("omcRiskNotes", value)} />
-              <TextField label="Other risk notes" value={property.riskNotes} onChange={value => updateProperty("riskNotes", value)} />
+              <TextField label="Building management company or safety issues" value={property.omcRiskNotes} onChange={value => updateProperty("omcRiskNotes", value)} />
+              <TextField label="Other potential issues" value={property.riskNotes} onChange={value => updateProperty("riskNotes", value)} />
               <div className="flex justify-between">
                 <Button variant="outline" onClick={() => setStep("setup")}>Back</Button>
-                <Button onClick={() => setStep("comps")}>Next: Similar Rentals</Button>
+                <Button onClick={() => setStep("comps")}>Next: Rental Proof (Nearby Matches)</Button>
               </div>
             </CardContent>
           </Card>
@@ -876,48 +1081,48 @@ export default function Home() {
         {step === "comps" && (
           <Card>
             <CardHeader>
-              <CardTitle>Similar rental listings</CardTitle>
-              <CardDescription>Better rental matches increase confidence in the rent estimate and ranking.</CardDescription>
+              <CardTitle>Rental proof (nearby matches)</CardTitle>
+              <CardDescription>Adding similar nearby rentals helps prove your expected rent is realistic and legal.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="grid gap-4 rounded-lg border bg-background p-4 md:grid-cols-4">
-                <TextField label="Source URL / note" value={newComp.source || ""} onChange={value => setNewComp({ ...newComp, source: value })} />
-                <TextField label="Address / development" value={newComp.address || ""} onChange={value => setNewComp({ ...newComp, address: value })} />
-                <NumberField label="Rent per month" value={Number(newComp.rent || 0)} onChange={value => setNewComp({ ...newComp, rent: value })} />
+                <TextField label="Proof source (link or note)" value={newComp.source || ""} onChange={value => setNewComp({ ...newComp, source: value })} />
+                <TextField label="Comparable address or development" value={newComp.address || ""} onChange={value => setNewComp({ ...newComp, address: value })} />
+                <NumberField label="Actual monthly rent" value={Number(newComp.rent || 0)} onChange={value => setNewComp({ ...newComp, rent: value })} />
                 <div className="space-y-2">
-                  <Label htmlFor={rentalMatchId}>Rental match quality</Label>
+                  <Label htmlFor={rentalMatchId}>Match similarity tier</Label>
                   <select
                     id={rentalMatchId}
                     className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
                     value={newComp.tier || "C"}
                     onChange={event => setNewComp({ ...newComp, tier: event.target.value as RentComp["tier"] })}
                   >
-                    <option value="A">Same building</option>
-                    <option value="B">Same development</option>
-                    <option value="C">Same local area</option>
-                    <option value="D">Broader area only</option>
+                    <option value="A">Located in the exact same building</option>
+                    <option value="B">Located in the same housing development</option>
+                    <option value="C">Located in the same local street or neighborhood</option>
+                    <option value="D">Located in the broader surrounding area</option>
                   </select>
                 </div>
-                <NumberField label="Beds" value={Number(newComp.beds || property.beds)} onChange={value => setNewComp({ ...newComp, beds: value })} />
-                <NumberField label="Baths" value={Number(newComp.baths || property.baths)} onChange={value => setNewComp({ ...newComp, baths: value })} />
-                <NumberField label="Size sqm" value={Number(newComp.sizeSqm || property.sizeSqm)} onChange={value => setNewComp({ ...newComp, sizeSqm: value })} />
-                <TextField label="Energy rating (BER)" value={newComp.ber || property.ber} onChange={value => setNewComp({ ...newComp, ber: value })} />
-                <TextField label="Parking" value={newComp.parking || ""} onChange={value => setNewComp({ ...newComp, parking: value })} />
-                <SelectField label="Same building" value={newComp.sameBuilding ? "Yes" : "No"} options={["No", "Yes"]} onChange={value => setNewComp({ ...newComp, sameBuilding: value === "Yes" })} />
-                <TextField label="Adjustment notes" value={newComp.notes || ""} onChange={value => setNewComp({ ...newComp, notes: value })} />
+                <NumberField label="Bedrooms" value={Number(newComp.beds || property.beds)} onChange={value => setNewComp({ ...newComp, beds: value })} />
+                <NumberField label="Bathrooms" value={Number(newComp.baths || property.baths)} onChange={value => setNewComp({ ...newComp, baths: value })} />
+                <NumberField label="Property size (square meters)" value={Number(newComp.sizeSqm || property.sizeSqm)} onChange={value => setNewComp({ ...newComp, sizeSqm: value })} />
+                <TextField label="Building energy rating (BER)" value={newComp.ber || property.ber} onChange={value => setNewComp({ ...newComp, ber: value })} />
+                <TextField label="Parking spaces" value={newComp.parking || ""} onChange={value => setNewComp({ ...newComp, parking: value })} />
+                <SelectField label="Located in the exact same building" value={newComp.sameBuilding ? "Yes" : "No"} options={["No", "Yes"]} onChange={value => setNewComp({ ...newComp, sameBuilding: value === "Yes" })} />
+                <TextField label="Notes on differences" value={newComp.notes || ""} onChange={value => setNewComp({ ...newComp, notes: value })} />
                 <div className="flex items-end">
-                  <Button className="w-full" onClick={addComp}>Add Comparable</Button>
+                  <Button className="w-full" onClick={addComp}>Add Comparable Proof</Button>
                 </div>
               </div>
 
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Comp</TableHead>
-                    <TableHead>Similarity</TableHead>
-                    <TableHead>Rent</TableHead>
-                    <TableHead>Facts</TableHead>
-                    <TableHead>Notes</TableHead>
+                    <TableHead>Comparable Address</TableHead>
+                    <TableHead>Match Quality</TableHead>
+                    <TableHead>Actual Rent</TableHead>
+                    <TableHead>Property Facts</TableHead>
+                    <TableHead>Adjustments / Notes</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -934,11 +1139,11 @@ export default function Home() {
               </Table>
 
               <div className="rounded-lg border bg-background p-4 text-sm">
-                Confidence in rent estimate: <Badge>{currentAnalysis.rentConfidence}</Badge>
+                Reliability of your rent estimate: <Badge>{currentAnalysis.rentConfidence}</Badge>
               </div>
               <div className="flex justify-between">
                 <Button variant="outline" onClick={() => setStep("entry")}>Back</Button>
-                <Button onClick={() => setStep("confirm")}>Next: Check Facts</Button>
+                <Button onClick={() => setStep("confirm")}>Next: Review and Confirm Your Data</Button>
               </div>
             </CardContent>
           </Card>
@@ -947,17 +1152,17 @@ export default function Home() {
         {step === "confirm" && (
           <Card>
             <CardHeader>
-              <CardTitle>Check and confirm facts</CardTitle>
-              <CardDescription>Mark each important fact as confirmed, estimated, or unknown before analysis.</CardDescription>
+              <CardTitle>Review and confirm your data</CardTitle>
+              <CardDescription>Verify the status of each crucial fact to ensure your profit calculation is safe.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Field</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Confidence</TableHead>
-                    <TableHead>Impact</TableHead>
+                    <TableHead>Information</TableHead>
+                    <TableHead>Details</TableHead>
+                    <TableHead>Trust Level</TableHead>
+                    <TableHead>Why it Matters</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -965,50 +1170,50 @@ export default function Home() {
                     <TableCell>Address</TableCell>
                     <TableCell>{property.address}</TableCell>
                     <TableCell><Badge>Confirmed</Badge></TableCell>
-                    <TableCell>Needed before a property enters the main ranking.</TableCell>
+                    <TableCell>Needed to correctly compare this property with others.</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell>Exact local area</TableCell>
+                    <TableCell>Specific street or block</TableCell>
                     <TableCell>{property.microLocation}</TableCell>
                     <TableCell><InlineStatusSelect value={property.microLocationStatus} onChange={value => updateProperty("microLocationStatus", value)} /></TableCell>
-                    <TableCell>Uncertain location makes the score more conservative.</TableCell>
+                    <TableCell>Uncertain neighborhood details lower our trust in the market rent.</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell>Size</TableCell>
+                    <TableCell>Property size</TableCell>
                     <TableCell>{property.sizeSqm} sqm</TableCell>
                     <TableCell><InlineStatusSelect value={property.sizeStatus} onChange={value => updateProperty("sizeStatus", value)} /></TableCell>
-                    <TableCell>Unknown size lowers data confidence.</TableCell>
+                    <TableCell>Not knowing size makes comparing prices less accurate.</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell>Energy rating (BER)</TableCell>
+                    <TableCell>Building energy rating (BER)</TableCell>
                     <TableCell>{property.ber}</TableCell>
                     <TableCell><InlineStatusSelect value={property.berStatus} onChange={value => updateProperty("berStatus", value)} /></TableCell>
-                    <TableCell>D/E ratings need an upgrade budget and rent-risk check.</TableCell>
+                    <TableCell>Poor heating efficiency requires setting aside upgrade cash.</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell>Annual management/service charge</TableCell>
+                    <TableCell>Yearly building upkeep fees (service charge)</TableCell>
                     <TableCell>{euro(property.annualServiceCharge)}</TableCell>
                     <TableCell><InlineStatusSelect value={property.serviceChargeStatus} onChange={value => updateProperty("serviceChargeStatus", value)} /></TableCell>
-                    <TableCell>Estimated or unknown charges trigger conservative sensitivity.</TableCell>
+                    <TableCell>Unconfirmed building fees can eat into your monthly profits.</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell>Tenancy status</TableCell>
+                    <TableCell>Occupancy status</TableCell>
                     <TableCell>{property.tenancyStatus}</TableCell>
                     <TableCell><InlineStatusSelect value={property.tenancyStatusConfidence} onChange={value => updateProperty("tenancyStatusConfidence", value)} /></TableCell>
-                    <TableCell>Unknown tenancy raises rent-history and legal-rent risk.</TableCell>
+                    <TableCell>Unconfirmed tenancy history could mean legal rent caps are hidden.</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>Rental evidence</TableCell>
                     <TableCell>{currentAnalysis.rentConfidence}</TableCell>
                     <TableCell><Badge variant={currentAnalysis.rentConfidence === "High" ? "default" : "secondary"}>{compTierLabel(weakestCompTier(property.comps))}</Badge></TableCell>
-                    <TableCell>Same-building, same-development, or multiple same-area rentals improve confidence.</TableCell>
+                    <TableCell>Having strong proof nearby makes your rent projection highly trustworthy.</TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
               <div className="grid gap-4 md:grid-cols-3">
-                <SummaryCard title="Data confidence" value={`${currentAnalysis.scores.dataQualityScore}/10`} description={currentAnalysis.scores.rankingConfidence} />
-                <SummaryCard title="Decision rule" value={currentAnalysis.verdict} description="No strong candidate with unresolved rent, management-company, or data gaps" />
-                <SummaryCard title="Items to verify" value={`${currentAnalysis.unresolvedRisks.length}`} description={readableRisks(currentAnalysis.unresolvedRisks) || "No automatic risk gates"} />
+                <SummaryCard title="Data completeness" value={`${currentAnalysis.scores.dataQualityScore}/10`} description={currentAnalysis.scores.rankingConfidence} />
+                <SummaryCard title="Underwriter rules" value={verdictLabel(currentAnalysis.verdict)} description="We require confirmed facts and building documentation for a top recommendation" />
+                <SummaryCard title="Unconfirmed items to verify" value={`${currentAnalysis.unresolvedRisks.length}`} description={readableRisks(currentAnalysis.unresolvedRisks) || "All crucial facts are verified"} />
               </div>
               <div className="flex justify-between">
                 <Button variant="outline" onClick={() => setStep("comps")}>Back</Button>
@@ -1022,38 +1227,102 @@ export default function Home() {
           <div className="space-y-6">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="text-2xl font-semibold">{property.name || "Proposed property"}</h2>
-                <p className="text-sm text-muted-foreground">{property.address}</p>
+                <h2 className="text-3xl tracking-tight" style={{fontFamily: 'var(--font-serif)'}}>{property.name || "Proposed property"}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{property.address}</p>
               </div>
               <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => setStep("entry")}>Edit Details</Button>
                 <Button variant="outline" onClick={() => setStep("confirm")}>Back</Button>
-                <Button onClick={saveProperty}>Save Property</Button>
+                <Button onClick={saveProperty}>Save to Dashboard</Button>
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-4">
-              <MetricCard title="Combined downside cash flow" value={`${euro(currentAnalysis.combined.monthlyCashFlow)}/mo`} description="Rent down, costs up, two months empty, 7% rate" className={riskColor(currentAnalysis.combined.monthlyCashFlow)} />
-              <MetricCard title="Empty-month cushion" value={`${vacancyLimit.toFixed(1)} months`} description="Months empty before cash flow turns negative" />
-              <MetricCard title="Monthly cash flow after tax" value={`${euro(currentAnalysis.baseCashFlow)}/mo`} description="After the main 30% tax assumption" className={riskColor(currentAnalysis.baseCashFlow)} />
-              <MetricCard title="Data confidence" value={`${currentAnalysis.scores.dataQualityScore}/10`} description={currentAnalysis.scores.rankingConfidence} />
-              <MetricCard title="Estimated annual return" value={pct(currentAnalysis.financial.economicRoiByTaxRate[currentAnalysis.centralKey])} description="Before property-price growth" />
-              <MetricCard title="Mortgage required" value={euro(currentAnalysis.financial.mortgageRequired)} description={`Loan-to-value ${pct(currentAnalysis.financial.ltv)}`} />
-              <MetricCard title="Opening offer" value={euro(currentAnalysis.negotiation.openingPrice)} description={`${currentAnalysis.negotiation.acceptanceProbability} acceptance probability`} />
-              <MetricCard title="Decision" value={currentAnalysis.verdict} description={readableRisks(currentAnalysis.unresolvedRisks) || "No automatic gates"} />
+            {/* Hero metric: worst-case */}
+            <Card className={`border-l-4 ${currentAnalysis.combined.monthlyCashFlow > 0 ? 'border-l-emerald-600' : currentAnalysis.combined.monthlyCashFlow >= -100 ? 'border-l-amber-500' : 'border-l-red-500'}`}>
+              <CardContent className="flex flex-col gap-6 py-5 md:grid md:grid-cols-[1fr_1fr_1fr]">
+                <div>
+                  <div className="text-base font-medium">Worst-case monthly profit</div>
+                  <div className={`mt-1 text-4xl font-semibold tracking-tight ${riskColor(currentAnalysis.combined.monthlyCashFlow)}`}>
+                    {euro(currentAnalysis.combined.monthlyCashFlow)}/mo
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">If interest rates spike, the property sits empty, and upkeep costs rise all at once</p>
+                </div>
+                <div>
+                  <div className="text-base font-medium">Expected monthly profit</div>
+                  <div className={`mt-1 text-4xl font-semibold tracking-tight ${riskColor(currentAnalysis.baseCashFlow)}`}>
+                    {euro(currentAnalysis.baseCashFlow)}/mo
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">Cash left over after your estimated income tax</p>
+                </div>
+                <div>
+                  <div className="text-base font-medium">Verdict</div>
+                  <div className="mt-1">
+                    <span className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${verdictBadgeClasses(currentAnalysis.verdict)}`}>
+                      {verdictLabel(currentAnalysis.verdict)}
+                    </span>
+                  </div>
+                  {currentAnalysis.unresolvedRisks.length > 0 && (
+                    <ul className="mt-2 space-y-0.5 text-sm text-muted-foreground">
+                      {currentAnalysis.unresolvedRisks.map(risk => (
+                        <li key={risk} className="flex items-start gap-1.5">
+                          <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500" />
+                          {readableRisk(risk)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {currentAnalysis.unresolvedRisks.length === 0 && (
+                    <p className="mt-2 text-sm text-muted-foreground">All crucial facts are verified</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Secondary metric cards */}
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+              <MetricCard title="Empty-month safety cushion" value={`${vacancyLimit.toFixed(1)} months`} description="How many months empty per year before you lose money" />
+              <MetricCard title="Data completeness" value={`${currentAnalysis.scores.dataQualityScore}/10`} description={`${currentAnalysis.scores.rankingConfidence}. ${currentAnalysis.unresolvedRisks.length > 0 ? 'Missing: ' + currentAnalysis.unresolvedRisks.map(readableRisk).slice(0, 2).join(', ') : 'All key facts confirmed'}`} />
+              <MetricCard title="Estimated annual return" value={pct(currentAnalysis.financial.economicRoiByTaxRate[currentAnalysis.centralKey])} description="Cash profit percentage return before any property price growth" />
+              <MetricCard title="Mortgage loan amount" value={euro(currentAnalysis.financial.mortgageRequired)} description={`Mortgage size compared to price ${pct(currentAnalysis.financial.ltv)}`} />
+              <MetricCard title="Opening offer guideline" value={euro(currentAnalysis.negotiation.openingPrice)} description={`${currentAnalysis.negotiation.acceptanceProbability} seller acceptance chance`} />
             </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Test a higher mortgage rate</CardTitle>
-                <CardDescription>Move the rate and watch formula-based cash flow update immediately. No AI changes these numbers.</CardDescription>
+            {/* Bottom Line synthesis */}
+            <div className="rounded-xl border border-border/50 bg-card p-5">
+              <div className="text-base font-medium" style={{fontFamily: 'var(--font-serif)'}}>Bottom line</div>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                {property.name || "This property"} earns an expected {euro(currentAnalysis.baseCashFlow)}/mo after tax, but under worst-case stress conditions (rate hikes, vacancy, rising costs) this drops to {euro(currentAnalysis.combined.monthlyCashFlow)}/mo — a {resilienceLabel(currentAnalysis.combined.resilienceCategory).toLowerCase()}.
+                {currentAnalysis.unresolvedRisks.length > 0
+                  ? ` Before making an offer, verify: ${currentAnalysis.unresolvedRisks.map(readableRisk).join(", ")}.`
+                  : " All critical facts are verified and the property is ready for an offer."}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground italic">
+                This is scenario analysis, not investment advice. Always verify with a solicitor, tax advisor, broker, and surveyor before making an offer.
+              </p>
+            </div>
+
+            {/* Assumptions bar */}
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+              <span>Interest rate: {(assumptions.mortgageRate * 100).toFixed(2)}%</span>
+              <span>Tax bracket: {(assumptions.centralTaxRate * 100).toFixed(0)}%</span>
+              <span>Vacancy: {assumptions.vacancyMonthsBase} months/year</span>
+              <span>Loan term: {assumptions.mortgageTermYears} years</span>
+              <button className="underline hover:text-foreground" onClick={() => setStep("setup")}>Change assumptions</button>
+            </div>
+
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="border-b border-border/40 pb-4">
+                <CardTitle style={{fontFamily: 'var(--font-serif)'}} className="text-xl">Test a higher interest rate</CardTitle>
+                <CardDescription className="mt-1">Drag the slider to see how rising bank interest rates instantly change your monthly profits.</CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-[1fr_240px]">
+              <CardContent className="flex flex-col gap-4 pt-5 md:grid md:grid-cols-[1fr_240px]">
                 <div>
-                  <Label htmlFor={mortgageStressSliderId}>Mortgage rate: {(sliderRate * 100).toFixed(2)}%</Label>
+                  <Label htmlFor={mortgageStressSliderId} className="text-sm font-medium">Bank interest rate: <span className="text-primary font-semibold">{(sliderRate * 100).toFixed(2)}%</span></Label>
                   <input
                     id={mortgageStressSliderId}
                     aria-label="Mortgage rate stress slider"
-                    className="mt-3 w-full accent-foreground"
+                    className="mt-3 w-full"
+                    style={{accentColor: 'var(--palette-forestGreen600)'}}
                     type="range"
                     min="3"
                     max="8"
@@ -1067,9 +1336,9 @@ export default function Home() {
                     <span>8%</span>
                   </div>
                 </div>
-                <div className="rounded-lg border bg-background p-4">
-                  <div className="text-sm text-muted-foreground">Cash flow at selected rate</div>
-                  <div className={`mt-1 text-3xl font-semibold ${riskColor(currentAnalysis.baseCashFlow)}`}>
+                <div className="rounded-xl border border-border/50 bg-accent/40 p-4">
+                  <div className="text-xs font-medium tracking-widest text-muted-foreground uppercase">Expected monthly profit at this rate</div>
+                  <div className={`mt-2 text-3xl font-semibold tracking-tight ${riskColor(currentAnalysis.baseCashFlow)}`}>
                     {euro(currentAnalysis.baseCashFlow)}/mo
                   </div>
                 </div>
@@ -1077,39 +1346,39 @@ export default function Home() {
             </Card>
 
             <Tabs defaultValue="financials">
-              <TabsList className="flex-wrap">
-                <TabsTrigger value="financials">Numbers</TabsTrigger>
-                <TabsTrigger value="stress">Downside Tests</TabsTrigger>
-                <TabsTrigger value="scoring">Risk Profile</TabsTrigger>
-                <TabsTrigger value="negotiation">Negotiation</TabsTrigger>
-                <TabsTrigger value="report">Report</TabsTrigger>
+              <TabsList className="flex flex-wrap h-auto gap-2 max-w-full overflow-x-auto justify-start hide-scrollbar bg-transparent">
+                <TabsTrigger value="financials">Profit Breakdown</TabsTrigger>
+                <TabsTrigger value="stress">Worst-Case Stress Tests</TabsTrigger>
+                <TabsTrigger value="scoring">Risk Footprint</TabsTrigger>
+                <TabsTrigger value="negotiation">Negotiation Strategy</TabsTrigger>
+                <TabsTrigger value="report">Final Summary Report</TabsTrigger>
               </TabsList>
               <TabsContent value="financials" className="mt-4">
                 <Card>
-                  <CardHeader><CardTitle>Financial Breakdown</CardTitle></CardHeader>
+                  <CardHeader><CardTitle>Profit Breakdown Details</CardTitle></CardHeader>
                   <CardContent className="grid gap-3 md:grid-cols-2">
-                    <Fact label="Total acquisition cost" value={euro(currentAnalysis.financial.totalAcquisitionCost)} />
-                    <Fact label="Stamp duty" value={euro(stampDuty(property.askingPrice))} />
-                    <Fact label="Full annual rent before vacancy" value={euro(currentAnalysis.financial.annualHeadlineRent)} />
-                    <Fact label="Rent after expected empty period" value={euro(currentAnalysis.financial.vacancyAdjustedRent)} />
-                    <Fact label="Year-one interest" value={euro(currentAnalysis.financial.yearOneInterest)} />
-                    <Fact label="Year-one principal" value={euro(currentAnalysis.financial.yearOnePrincipal)} />
-                    <Fact label="Minimum rent needed to avoid losing cash" value={`${euro(currentAnalysis.financial.breakEvenRent)}/mo`} />
-                    <Fact label="Rent cover ratio" value={currentAnalysis.financial.dscr.toFixed(2)} />
+                    <Fact label="Total upfront cash needed to buy" value={euro(currentAnalysis.financial.totalAcquisitionCost)} />
+                    <Fact label="Government buying tax (Stamp Duty)" value={euro(stampDuty(property.askingPrice))} />
+                    <Fact label="Expected yearly rent (if fully occupied)" value={euro(currentAnalysis.financial.annualHeadlineRent)} />
+                    <Fact label="Yearly rent (minus normal empty weeks)" value={euro(currentAnalysis.financial.vacancyAdjustedRent)} />
+                    <Fact label="Year one mortgage interest paid" value={euro(currentAnalysis.financial.yearOneInterest)} />
+                    <Fact label="Year one mortgage debt paid down" value={euro(currentAnalysis.financial.yearOnePrincipal)} />
+                    <Fact label="Minimum rent needed to avoid losing money" value={`${euro(currentAnalysis.financial.breakEvenRent)}/mo`} />
+                    <Fact label="Rent-to-mortgage safety ratio" value={`${currentAnalysis.financial.dscr.toFixed(2)} (above 1.2 is safe, above 2.0 is strong)`} />
                   </CardContent>
                 </Card>
               </TabsContent>
               <TabsContent value="stress" className="mt-4">
                 <Card>
-                  <CardHeader><CardTitle>Downside Test Matrix</CardTitle></CardHeader>
+                  <CardHeader><CardTitle>Safety Stress Test Matrix</CardTitle></CardHeader>
                   <CardContent>
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Scenario</TableHead>
-                          <TableHead>Monthly cash flow</TableHead>
-                          <TableHead>Rent cover ratio</TableHead>
-                          <TableHead>Category</TableHead>
+                          <TableHead>Stress Scenario</TableHead>
+                          <TableHead>Monthly profit/loss</TableHead>
+                          <TableHead>Rent-to-mortgage safety ratio</TableHead>
+                          <TableHead>Safety Rating</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1118,7 +1387,7 @@ export default function Home() {
                             <TableCell>{item.scenarioId}. {item.name}</TableCell>
                             <TableCell className={riskColor(item.monthlyCashFlow)}>{euro(item.monthlyCashFlow)}</TableCell>
                             <TableCell>{item.dscr.toFixed(2)}</TableCell>
-                            <TableCell>{item.resilienceCategory}</TableCell>
+                            <TableCell>{resilienceLabel(item.resilienceCategory)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1129,8 +1398,8 @@ export default function Home() {
               <TabsContent value="scoring" className="mt-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Risk Profile</CardTitle>
-                    <CardDescription>Plain-English scores across the main risk areas. Higher is better.</CardDescription>
+                    <CardTitle>Risk Footprint Details</CardTitle>
+                    <CardDescription>Scores across key risk categories. Higher scores mean safer investments.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-6 lg:grid-cols-[1fr_360px]">
                     <div className="h-[360px]">
@@ -1145,13 +1414,13 @@ export default function Home() {
                       </ResponsiveContainer>
                     </div>
                     <div className="space-y-3">
-                      <Fact label="Raw risk score" value={`${currentAnalysis.scores.rawQualitativeScore}/10`} />
-                      <Fact label="Downside-protection score" value={`${currentAnalysis.scores.resilienceWeightedScore}/10`} />
-                      <Fact label="Overall score" value={`${currentAnalysis.scores.overallRiskAdjustedScore}/10`} />
+                      <Fact label="Basic risk score" value={`${currentAnalysis.scores.rawQualitativeScore}/10`} />
+                      <Fact label="Worst-case safety score" value={`${currentAnalysis.scores.resilienceWeightedScore}/10`} />
+                      <Fact label="Overall underwriter score" value={`${currentAnalysis.scores.overallRiskAdjustedScore}/10`} />
                       <div className="rounded-lg border p-3">
-                        <div className="text-sm font-medium">Risk flags</div>
+                        <div className="text-sm font-medium">Specific risk flags detected</div>
                         <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-                          {(currentAnalysis.scores.riskFlags.length ? currentAnalysis.scores.riskFlags : ["No automatic scoring flags."]).map(flag => (
+                          {(currentAnalysis.scores.riskFlags.length ? currentAnalysis.scores.riskFlags : ["No automatic safety flags detected."]).map(flag => (
                             <li key={flag}>{flag}</li>
                           ))}
                         </ul>
@@ -1165,17 +1434,17 @@ export default function Home() {
                   <CardHeader><CardTitle>Negotiation Strategy</CardTitle></CardHeader>
                   <CardContent className="space-y-5">
                     <div className="grid gap-4 md:grid-cols-4">
-                      <SummaryCard title="Opening" value={euro(currentAnalysis.negotiation.openingPrice)} description="Rounded buyer anchor" />
-                      <SummaryCard title="Target" value={euro(currentAnalysis.negotiation.targetPrice)} description="Risk-adjusted model price" />
-                      <SummaryCard title="Highest acceptable" value={euro(currentAnalysis.negotiation.stretchPrice)} description="Only after documents check out" />
-                      <SummaryCard title="Maximum price" value={euro(currentAnalysis.negotiation.walkAwayPrice)} description="Do not exceed" />
+                      <SummaryCard title="Starting Offer" value={euro(currentAnalysis.negotiation.openingPrice)} description="Your opening price to the seller" />
+                      <SummaryCard title="Fair Price" value={euro(currentAnalysis.negotiation.targetPrice)} description="Fair price based on building quality" />
+                      <SummaryCard title="Maximum (if docs are clean)" value={euro(currentAnalysis.negotiation.stretchPrice)} description="Highest price if all documents check out" />
+                      <SummaryCard title="Walk-Away Limit" value={euro(currentAnalysis.negotiation.walkAwayPrice)} description="Do not pay more than this" />
                     </div>
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Price point</TableHead>
+                          <TableHead>Offer scenario</TableHead>
                           <TableHead>Price</TableHead>
-                          <TableHead>Discount</TableHead>
+                          <TableHead>Discount off asking price</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1188,7 +1457,7 @@ export default function Home() {
                         ))}
                       </TableBody>
                     </Table>
-                    <pre className="whitespace-pre-wrap rounded-lg bg-foreground p-4 text-sm text-background">
+                    <pre className="whitespace-pre-wrap rounded-xl p-5 text-sm leading-relaxed" style={{background: 'var(--palette-forestGreen600)', color: 'var(--palette-brightIvory50)' }}>
                       {currentAnalysis.negotiation.agentScript}
                     </pre>
                   </CardContent>
@@ -1196,13 +1465,25 @@ export default function Home() {
               </TabsContent>
               <TabsContent value="report" className="mt-4">
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Underwriting Report</CardTitle>
-                    <CardDescription>Readable report built from formula-based numbers and confirmed facts.</CardDescription>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle>Property Underwriting Report</CardTitle>
+                      <CardDescription>Clear property report generated directly from verified facts and financial formulas.</CardDescription>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        navigator.clipboard.writeText(reportMarkdown(property, currentAnalysis, vacancyLimit));
+                        setIsCopied(true);
+                        setTimeout(() => setIsCopied(false), 2000);
+                      }}
+                    >
+                      {isCopied ? "Copied to Clipboard" : "Copy Report"}
+                    </Button>
                   </CardHeader>
                   <CardContent>
                     <article className="prose prose-neutral max-w-none dark:prose-invert">
-                      <ReactMarkdown>{reportMarkdown(property, currentAnalysis, vacancyLimit)}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportMarkdown(property, currentAnalysis, vacancyLimit)}</ReactMarkdown>
                     </article>
                   </CardContent>
                 </Card>
@@ -1214,14 +1495,14 @@ export default function Home() {
         {step === "dashboard" && selectedProperty && (
           <Card>
             <CardHeader>
-              <CardTitle>Selected property summary: {selectedProperty.name}</CardTitle>
+              <CardTitle>Selected property review: {selectedProperty.name}</CardTitle>
               <CardDescription>{selectedProperty.riskNotes}</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-4">
-              <SummaryCard title="Combined downside" value={euro(selectedAnalysis.combined.monthlyCashFlow)} description={selectedAnalysis.combined.resilienceCategory} />
-              <SummaryCard title="Overall score" value={`${selectedAnalysis.scores.overallRiskAdjustedScore}/10`} description="Weighted toward downside protection" />
-              <SummaryCard title="Rent confidence" value={selectedAnalysis.rentConfidence} description="Based on similar rental evidence" />
-              <SummaryCard title="Next action" value="Verify documents" description={readableRisks(selectedAnalysis.unresolvedRisks) || "Standard management-company pack"} />
+              <SummaryCard title="Worst-case profit" value={euro(selectedAnalysis.combined.monthlyCashFlow)} description={resilienceLabel(selectedAnalysis.combined.resilienceCategory)} />
+              <SummaryCard title="Overall safety score" value={`${selectedAnalysis.scores.overallRiskAdjustedScore}/10`} description="Focused heavily on capital safety" />
+              <SummaryCard title="Rent proof trust level" value={selectedAnalysis.rentConfidence} description="Based on local verified proof" />
+              <SummaryCard title="Next safety step" value="Verify documents" description={readableRisks(selectedAnalysis.unresolvedRisks) || "Collect standard management documents"} />
             </CardContent>
           </Card>
         )}
@@ -1320,13 +1601,13 @@ function InlineStatusSelect({ value, onChange }: { value: DataStatus; onChange: 
 
 function MetricCard({ title, value, description, className = "" }: { title: string; value: string; description: string; className?: string }) {
   return (
-    <Card>
+    <Card className="transition-shadow hover:shadow-md">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-sm font-medium text-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className={`text-2xl font-semibold ${className}`}>{value}</div>
-        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
   );

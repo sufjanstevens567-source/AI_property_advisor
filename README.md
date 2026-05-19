@@ -4,22 +4,17 @@ A risk-first underwriting app for screening Irish residential rental properties,
 
 The app is designed to help a user compare rental properties consistently: cash flow, downside resilience, rent evidence, document gaps, building risks, and negotiation price. It is a screening and scenario-analysis tool, not investment advice.
 
-## What Changed In This MVP Pass
+## Recent Updates: UX, Accessibility, and Mobile Overhaul
 
-Since the initial prototype, the project has been upgraded from a mostly static demo into a usable risk-first MVP surface:
+The application recently underwent a comprehensive 0-5 rubric-based design audit and overhaul to transition from a technical MVP to an institutional-grade, highly accessible financial decision-support tool. Key improvements include:
 
-- Rebuilt the web app around plain-English, naive-user-friendly labels.
-- Added a first-pass estimate flow for quick screening from asking price, expected rent, and annual management/service charge.
-- Added a step-by-step property workflow: buying assumptions, property details, similar rentals, fact checking, and analysis.
-- Added editable fact-confidence controls so confirmed, estimated, and unknown data affect confidence before analysis.
-- Reoriented the dashboard around downside protection before upside return.
-- Added live mortgage-rate stress testing with formula-based recalculation.
-- Added rendered Markdown underwriting reports instead of raw report text.
-- Added visual risk scoring with Recharts.
-- Integrated the financial, scoring, and negotiation engines into the web UI.
-- Expanded negotiation output with opening, target, highest acceptable, maximum price, sensitivity rows, and a plain-English agent script.
-- Hardened deterministic financial logic for break-even rent and stress-test categorization.
-- Added `docs/implementation-plan.md` with the remaining roadmap.
+- **Mobile & Responsive Redesign**: The desktop comparison table seamlessly converts into a touch-friendly vertical card stack on mobile. Metric grids reflow intelligently, and wizard steps use horizontal snap-scrolling to preserve large touch targets.
+- **Narrative Synthesis**: Added a "Bottom Line" card that automatically translates the complex financial metrics into a plain-English narrative paragraph.
+- **Improved Information Hierarchy**: Replaced flat, comma-separated risk lists with structured bullet points and color-coded status indicators (green/amber/red).
+- **Accessibility & Trust**: Replaced technical financial jargon with naive-user-friendly labels (e.g., "Comfortable safety margin"). Added inline benchmarks for complex ratios.
+- **Interactive Polish**: Implemented clickable wizard step buttons with completion checkmarks, dynamic color-responsive stress sliders, and hover-state elevations.
+- **Print-Ready Final Report**: The final underwriting report now renders fully formatted HTML tables for financials and stress tests (via `remark-gfm`), includes prioritized next-step checklists, and features a 1-click "Copy Report" functionality.
+- **Refined Agent Script**: The auto-generated negotiation email is now more natural, less robotic, and ready to send.
 
 ## Core Principles
 
