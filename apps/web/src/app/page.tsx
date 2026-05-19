@@ -786,8 +786,8 @@ export default function Home() {
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-8">
         <header className="flex flex-col gap-3 border-b border-border/60 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase" style={{letterSpacing: '0.08em'}}>Check the risks before chasing returns</p>
-            <h1 className="mt-1 text-4xl tracking-tight" style={{fontFamily: 'var(--font-serif)'}}>Irish Rental Property Underwriter</h1>
+            <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase" style={{letterSpacing: '0.08em'}}>Model your returns, stress-test your risks, and walk in with a winning offer</p>
+            <h1 className="mt-1 text-4xl tracking-tight" style={{fontFamily: 'var(--font-serif)'}}>Your AI Co-Pilot for Irish Rental Investment</h1>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setStep("dashboard")}>Dashboard</Button>
