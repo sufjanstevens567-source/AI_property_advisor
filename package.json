@@ -4,5 +4,8 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@property-underwriter/financial-engine --workspace=@property-underwriter/scoring-engine --workspace=@property-underwriter/negotiation-engine --workspace=@property-underwriter/ai-prompts && npm run build --workspace=web"
+  }
 }
