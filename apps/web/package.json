@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run build --prefix ../.. --workspace=@property-underwriter/financial-engine --workspace=@property-underwriter/scoring-engine --workspace=@property-underwriter/negotiation-engine --workspace=@property-underwriter/ai-prompts && next build",
     "start": "next start",
     "lint": "eslint"
   },
